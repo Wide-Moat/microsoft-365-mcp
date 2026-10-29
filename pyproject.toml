@@ -1,0 +1,38 @@
+[project]
+name = "m365-mcp"
+version = "0.1.0"
+license = "Apache-2.0"
+description = "MCP server for one person's Microsoft 365 through Microsoft Graph"
+requires-python = ">=3.12"
+dependencies = [
+  "mcp==2.3.0",
+  "httpx==0.28.1",
+  "pydantic==2.14.1",
+  "nh3==0.3.7",
+  "css-inline==0.23.0",
+  "cryptography>=46",
+  "uvicorn==0.54.0",
+  "prometheus-client>=0.23",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "respx==0.23.1",
+  "tiktoken==0.14.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/m365_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+markers = ["live: talks to a real Microsoft 365 test tenant; never runs in CI"]
+addopts = "-m 'not live' --strict-markers"

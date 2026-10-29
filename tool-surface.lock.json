@@ -1,0 +1,572 @@
+{
+  "tools": {
+    "cancel_booking": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Cancel an appointment"
+      },
+      "area": "bookings",
+      "gates": {},
+      "input_schema_sha256": "4055985fe403e64e45708d87a9b9d16c065c3a3e2195398c24ffc2483ed52ff7",
+      "switch": null
+    },
+    "cancel_event": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Cancel a meeting"
+      },
+      "area": "calendar",
+      "gates": {},
+      "input_schema_sha256": "eb1c2ffecc08e4bdae90cfed4be1be937f5bc990c6494ff113c0434f2e218711",
+      "switch": null
+    },
+    "delete_contact": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Delete a contact"
+      },
+      "area": "contacts",
+      "gates": {},
+      "input_schema_sha256": "8ca552c0233af502f361019d3be4be33c6701694e6db85927b34d36eb3f8e308",
+      "switch": null
+    },
+    "delete_list_item": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Delete a list item"
+      },
+      "area": "lists",
+      "gates": {},
+      "input_schema_sha256": "41b77b6e07a8cf260aeb0f3cd3ebe0e5bd3dd742c7cdc997e1fe40f7622a9aa8",
+      "switch": null
+    },
+    "delete_note_page": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Delete a OneNote page"
+      },
+      "area": "notes",
+      "gates": {},
+      "input_schema_sha256": "57bf36de0a5b235ad0e7a390ac634bea0b3d874496225d5776053510d51bc31c",
+      "switch": null
+    },
+    "delete_task": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Delete a task"
+      },
+      "area": "tasks",
+      "gates": {},
+      "input_schema_sha256": "9d0106c5cd73d864f15054fedbe8c35b0d6638fd84af8f5fe0bc32cec013e73c",
+      "switch": null
+    },
+    "download_file": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Download a file"
+      },
+      "area": "files",
+      "gates": {},
+      "input_schema_sha256": "b736081ffcbad90054c71ddb06ceb4f4811e27db1cecb60a0df257d8dc9a742e",
+      "switch": null
+    },
+    "find_meeting_times": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Find when people are free"
+      },
+      "area": "calendar",
+      "gates": {
+        "rooms": "switch rooms"
+      },
+      "input_schema_sha256": "1c6f8212379c72d8bac4309db8f0752ab700a9d9e4cd88a44537e304617c264e",
+      "switch": null
+    },
+    "get_connection": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Microsoft 365 connection"
+      },
+      "area": "account",
+      "gates": {},
+      "input_schema_sha256": "1831e96f8dcd928826894a0e437ae1e70d443e6f7ec6da7c2432a64be17bab8c",
+      "switch": null
+    },
+    "get_conversation": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read a Teams chat or channel"
+      },
+      "area": "teams",
+      "gates": {
+        "channel": "switch teams_channels",
+        "team": "switch teams_channels",
+        "thread": "switch teams_channels"
+      },
+      "input_schema_sha256": "446a2770cdbfc51d133cc5285c903196334d36c9b6abd26aa64d9b040b5a6296",
+      "switch": null
+    },
+    "get_event": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read an event"
+      },
+      "area": "calendar",
+      "gates": {
+        "include_recording": "area recordings",
+        "include_transcript": "switch transcripts"
+      },
+      "input_schema_sha256": "5b933649198d40a85331fe1b83d2f91d4016ca33482f353b36c14cc6c4c8f620",
+      "switch": null
+    },
+    "get_file": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read file details"
+      },
+      "area": "files",
+      "gates": {},
+      "input_schema_sha256": "80d0b38aa36e5b58c0cf76ba4d464fb3aa516cbae7134c5838af6a0a3cc1ddd8",
+      "switch": null
+    },
+    "get_message": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read a message"
+      },
+      "area": "mail",
+      "gates": {},
+      "input_schema_sha256": "1de69f7c71851f13b2ea4d25d4f83ad0921be109c65147f2488d2323e3cd120e",
+      "switch": null
+    },
+    "get_note_page": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read a OneNote page"
+      },
+      "area": "notes",
+      "gates": {},
+      "input_schema_sha256": "43cb98b24dbae035cb442e4ce6de75c2a4238f8afcf8ac2c9d29f5f6a5003b6d",
+      "switch": null
+    },
+    "get_range": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read a workbook"
+      },
+      "area": "excel",
+      "gates": {},
+      "input_schema_sha256": "09d77e037dee7d9a71e8b47302daffaf5f77fc5998967727df0d57cae9071964",
+      "switch": null
+    },
+    "list_bookings": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List bookings"
+      },
+      "area": "bookings",
+      "gates": {},
+      "input_schema_sha256": "3d3c2bbf121fa9790a45aade2a79d3a96ad0d39c52cba06987c339d62114d7c1",
+      "switch": null
+    },
+    "list_conversations": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List Teams chats and channels"
+      },
+      "area": "teams",
+      "gates": {},
+      "input_schema_sha256": "486a363b325f094faa9c87e9c28e8f420bbd446226f2f3fca9c443a7f330a40f",
+      "switch": null
+    },
+    "list_events": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List calendar events"
+      },
+      "area": "calendar",
+      "gates": {},
+      "input_schema_sha256": "140a4849098bedfe0aff1cb4efc26c170d522756af15d49d4e7a91a404902aed",
+      "switch": null
+    },
+    "list_files": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Find files and sites"
+      },
+      "area": "files",
+      "gates": {},
+      "input_schema_sha256": "41d1d3f5d1d30a4313c1d05ee565080340907c13e045344a124aef27acbc89f2",
+      "switch": null
+    },
+    "list_list_items": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read SharePoint list items"
+      },
+      "area": "lists",
+      "gates": {},
+      "input_schema_sha256": "2cd104caddbe85a82656791a8e8be9b98f037c86ac0d715457f41a56a9dedb6c",
+      "switch": null
+    },
+    "list_messages": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Find messages or folders"
+      },
+      "area": "mail",
+      "gates": {},
+      "input_schema_sha256": "ab69f44ea614b0d38f31ea35eb28ee9e01c48526dea3a86720637ca4f39f0114",
+      "switch": null
+    },
+    "list_notes": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List OneNote notebooks and pages"
+      },
+      "area": "notes",
+      "gates": {},
+      "input_schema_sha256": "5611a0ce8cd691ec4c8d4bbfa72587da12183c7851046f5aadd0717d5f7a3419",
+      "switch": null
+    },
+    "list_people": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Find people"
+      },
+      "area": "account",
+      "gates": {},
+      "input_schema_sha256": "69bc334577a6a818c377c5cd0a68ed6af6912a487455e25e5d470ca7d4b7ed6d",
+      "switch": null
+    },
+    "list_tasks": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Find tasks, lists and plans"
+      },
+      "area": "tasks",
+      "gates": {},
+      "input_schema_sha256": "82956bd39fa485a7ed79a937fb0a69f5c33ff198c550ef53d1817f596a323bcd",
+      "switch": null
+    },
+    "respond_to_event": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Answer an invitation"
+      },
+      "area": "calendar",
+      "gates": {},
+      "input_schema_sha256": "6bec71a5e42aae6b6c8fa54855825b2655c34d4259df43b12d669f812ab92c6b",
+      "switch": null
+    },
+    "save_automatic_reply": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Set the automatic reply"
+      },
+      "area": "mail",
+      "gates": {},
+      "input_schema_sha256": "c3627ff047d63d2e18be957ee08f41c4a4f52a59476ba9ffe20129410d3728ab",
+      "switch": null
+    },
+    "save_booking": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Book or change an appointment"
+      },
+      "area": "bookings",
+      "gates": {},
+      "input_schema_sha256": "ec52f483269b2794abce6442ca7d35aaa1ac0ea814394b4cc37562120f75e4a8",
+      "switch": null
+    },
+    "save_chat": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Create or change a group chat"
+      },
+      "area": "teams",
+      "gates": {},
+      "input_schema_sha256": "35d0f3ef0622e6ff271f34bc4a2659088a11637764cad28596c7af84ff2aa1d1",
+      "switch": "chat_admin"
+    },
+    "save_contact": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Create or change a contact"
+      },
+      "area": "contacts",
+      "gates": {},
+      "input_schema_sha256": "8b0b42af9723e8f0d1bf6b4d2c51aa020ed2f678bf982503221ec9e7cbd80920",
+      "switch": null
+    },
+    "save_draft": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Write a draft"
+      },
+      "area": "mail",
+      "gates": {},
+      "input_schema_sha256": "e04ac5fe2d23cd075463b188a2ea32904ac2640991d30f4976e5dba5765db283",
+      "switch": null
+    },
+    "save_event": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Create or change an event"
+      },
+      "area": "calendar",
+      "gates": {},
+      "input_schema_sha256": "529c6bb083320e6992766a8a5d6c892b8d4c2e54171c52620797f495de2ff286",
+      "switch": null
+    },
+    "save_list_item": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Add or change a list item"
+      },
+      "area": "lists",
+      "gates": {},
+      "input_schema_sha256": "a1ce46348955b28353506bc503c1355aa8b243aadc2b311ad8b21b8e1f96b169",
+      "switch": null
+    },
+    "save_mail_folder": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Create, rename or move a mail folder"
+      },
+      "area": "mail",
+      "gates": {},
+      "input_schema_sha256": "54491e1d489ba8200747ec1d2440596ef21bd3df95303b8083c9ec9c3b800778",
+      "switch": null
+    },
+    "save_note_page": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Write a OneNote page"
+      },
+      "area": "notes",
+      "gates": {},
+      "input_schema_sha256": "d8d52c6dc68c3f5073a165bd43a5c4131a3d166eef4240847611bdc14e6d0e00",
+      "switch": null
+    },
+    "save_range": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Write cells in a workbook"
+      },
+      "area": "excel",
+      "gates": {},
+      "input_schema_sha256": "3901cd40289d263d97b59f1c637d170121b5759470d7dd3247e6513f989345d3",
+      "switch": null
+    },
+    "save_task": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Create or change a task"
+      },
+      "area": "tasks",
+      "gates": {},
+      "input_schema_sha256": "5c2fbce18ccaaae33eab3a0610417874b098c26f8971174b9c3d1ca640266025",
+      "switch": null
+    },
+    "send_draft": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Send a draft"
+      },
+      "area": "mail",
+      "gates": {},
+      "input_schema_sha256": "7ae0c1e284b85d21dce8a6f24f4653b066d7a36f2f2a23916c8e31395e948543",
+      "switch": null
+    },
+    "send_message": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Send a Teams message"
+      },
+      "area": "teams",
+      "gates": {},
+      "input_schema_sha256": "ba9e2e8a93309e5edd8005c6c214dbde747a2736a6a71612e4ea6bafaadb405e",
+      "switch": null
+    },
+    "share_file": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Share a file"
+      },
+      "area": "files",
+      "gates": {},
+      "input_schema_sha256": "4dafd9917092101baa0d20118c1f26b536d14b62b8f9c3f09244102c30b939ca",
+      "switch": null
+    },
+    "update_file": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Move, copy, rename or delete files"
+      },
+      "area": "files",
+      "gates": {},
+      "input_schema_sha256": "ba85286cb671197135002b400040418a00ef1861bcea68a79bf501ed2f506043",
+      "switch": null
+    },
+    "update_message": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Edit or delete a Teams message"
+      },
+      "area": "teams",
+      "gates": {},
+      "input_schema_sha256": "cc402267766f43f2390edca8b8fd38d92f0e61e3ac505dd640cf569bf295976f",
+      "switch": null
+    },
+    "update_messages": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Move, mark, flag or delete messages"
+      },
+      "area": "mail",
+      "gates": {},
+      "input_schema_sha256": "04fd66bf5349fbd9f1554331fd2894d459f5700d03a8b5416563e2069ae9171e",
+      "switch": null
+    },
+    "upload_file": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Upload a file"
+      },
+      "area": "files",
+      "gates": {},
+      "input_schema_sha256": "d55a56b96f5ff6ee2e3b329757c98dd12e867b46fb73ded399514b4240996443",
+      "switch": null
+    }
+  }
+}

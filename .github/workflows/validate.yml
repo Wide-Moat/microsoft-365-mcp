@@ -1,0 +1,164 @@
+# Every check this repository has, self-contained: nothing here calls a workflow in another repository.
+# Hosted runners only: a public repository must never run outside contributions on our own machines.
+name: validate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+concurrency:
+  group: validate-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+
+  tests:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install the locked dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements-test.lock
+          python -m pip install --no-deps -e .
+      - name: the tests pass
+        run: python -m pytest -q -p no:cacheprovider --junitxml=report.xml
+      - name: the suite is not empty and every collected test ran
+        # A collection error or a skipped module leaves a suite that runs nothing and passes.
+        # The floor is derived from the tests on disk, not a number chosen once.
+        run: |
+          defined=$(grep -rhoE '^\s*(async )?def test_[a-z0-9_]+' tests | wc -l | tr -d ' ')
+          ran=$(python scripts/junit_ran.py report.xml)
+          echo "$defined test functions on disk, $ran test cases ran"
+          if [ "$defined" -lt 300 ]; then
+            echo "fewer test functions than this repository has: the check itself is broken"; exit 2
+          fi
+          if [ "$ran" -lt "$defined" ]; then
+            echo "$((defined - ran)) test functions did not run"; exit 1
+          fi
+      - name: the catalogue fits the token budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m m365_mcp.budget --check | tee budget.md
+          echo "## Token budget (default areas)" >> "$GITHUB_STEP_SUMMARY"
+          cat budget.md >> "$GITHUB_STEP_SUMMARY"
+          python -m m365_mcp.budget --all --check-tools > /dev/null
+      - name: every safety rule is caught by a test when it is broken
+        run: python scripts/mutation_check.py
+      - name: the tool surface matches tool-surface.lock.json
+        run: python -m m365_mcp.surface --check
+      - name: every Must refuse row names a collected test
+        shell: bash
+        run: |
+          set -euo pipefail
+          # tee, not a redirect: on failure the offending rows stay in the step log.
+          python scripts/refusal_map.py | tee refusal-map.txt | grep -vE '^(docs/|    test_)'
+          grep -E '^[0-9]+ rows in' refusal-map.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: every Must refuse row's test fails with its guard removed
+        # All rows, about 70 s: each mutation runs one test file's single test.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/refusal_evidence.py | tee refusal-evidence.txt
+          grep -E '^[0-9]+/[0-9]+ row tests' refusal-evidence.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: every manifesto rule names a collected test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/manifesto_map.py | tee manifesto-map.txt
+          grep -E '^[0-9]+ rules, ' manifesto-map.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: docs/tools.md matches the registry
+        run: |
+          python -m m365_mcp.docs > /tmp/tools.md
+          diff -u docs/tools.md /tmp/tools.md
+
+  budget-comment:
+    # The table on the pull request, so the cost of a change is read before it merges.
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --require-hashes -r requirements-test.lock
+          python -m pip install --no-deps -e .
+          python -m m365_mcp.budget > budget.md
+      - name: post or update the comment
+        # curl and the REST API: a self-hosted runner need not have the gh CLI.
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
+          auth=(-H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json")
+          { echo "<!-- m365-budget -->"; echo "### Token budget"; echo; cat budget.md; } > body.md
+          payload=$(python -c 'import json,sys; print(json.dumps({"body": open("body.md").read()}))')
+          id=$(curl -fsS "${auth[@]}" "${api}/issues/${PR}/comments?per_page=100" \
+               | python scripts/comment_id.py)
+          if [ -n "$id" ]; then
+            curl -fsS -X PATCH "${auth[@]}" "${api}/issues/comments/${id}" -d "$payload" > /dev/null
+          else
+            curl -fsS -X POST "${auth[@]}" "${api}/issues/${PR}/comments" -d "$payload" > /dev/null
+          fi
+          echo "budget comment posted on #${PR}"
+
+  # No real organisation's data in tracked files: addresses, tenant names, public IPs (manifesto 41).
+  purity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/purity_check.py .
+
+  # No secret in the tree or the history. The binary is pinned by version and checksum, so a
+  # moved tag cannot change what runs here.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks over every commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          v=8.21.2
+          base=https://github.com/gitleaks/gitleaks/releases/download
+          curl -fsSL -o gl.tgz "$base/v${v}/gitleaks_${v}_linux_x64.tar.gz"
+          echo "5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba  gl.tgz" | sha256sum -c -
+          tar xzf gl.tgz gitleaks
+          ./gitleaks git . --no-banner --redact --exit-code 1
+
+  yaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run yamllint==1.35.1 --strict .
+
+  image:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: the image builds
+        run: docker build -t m365-mcp:ci .

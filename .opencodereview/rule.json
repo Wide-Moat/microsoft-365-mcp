@@ -1,0 +1,20 @@
+{
+  "rules": [
+    {
+      "path": "src/**/*.py",
+      "merge_system_rule": true,
+      "rule": "This is an MCP server acting as ONE Microsoft 365 user through Microsoft Graph with that user's delegated token. Report each of the following as a blocking finding, quoting the line:\n\n1. Graph HTTP outside src/m365_mcp/graph/ (httpx, requests, aiohttp or msgraph SDK used in a tool module).\n2. A Graph path under /users/{id}/ for mail, mailFolders, messages, events, calendar, drive or chats, or any function/tool argument that selects a mailbox, user or tenant. Reading another person's free/busy (getSchedule, findMeetingTimes) and profile is the only exception.\n3. client_credentials, application permissions, a token persisted anywhere, or a token passed to a logger.\n4. A code path that sends mail (send, sendMail), posts a chat or channel message, creates/updates/cancels an event with attendees, or shares a file with new people, WITHOUT checking user_confirmed is True and WITHOUT drawing from the send bucket before the Graph call.\n5. HTTP DELETE on messages, events, driveItems or chatMessages; permanentDelete; emptying folders or the recycle bin. Deletion must be a move to Deleted Items or a driveItem delete (recycle bin) only.\n6. Inbox rules (messageRules), forwarding, automaticRepliesSetting, delegates, calendarPermissions, folder permissions, export/delta sync of a mailbox, or createLink with scope 'anonymous'.\n7. A tool returning a Graph object without a projection function; any key starting with '@odata.' or fields like changeKey/etag reaching a tool result.\n8. A list tool without a hard cap of 25, an offset/skip argument, or truncation without a 'truncated' flag in the result.\n9. File bytes or base64 content in a tool result.\n10. An exception converted into a successful return value, or a result dict with an 'error' key. Errors must raise ToolError so MCP sets isError.\n11. Tool annotations contradicting behaviour: readOnlyHint=True on anything that writes (including temp files or link slots); destructiveHint=False on a change; idempotentHint=True on a send.\n12. Subjects, bodies, email addresses, file names, search strings or person names in a log call OR in an exception message (exception messages end up in logs).\n13. Outgoing HTML not passed through the html pipeline (sanitize -> cid images -> inline css -> validate).\n14. A reply/forward built by replacing a message body instead of createReply/createReplyAll/createForward.\n15. Signed-link verification with == instead of hmac.compare_digest, a signer that accepts an empty key, or a payload field not covered by the signature.\n16. A whole file read into memory (.read() without size bound, response.content on a download).\n\nNon-blocking: comments that explain what instead of why; non-English text; duplicated helpers that exist in src/m365_mcp/core/."
+    },
+    {
+      "path": "src/m365_mcp/tools/**/*.py",
+      "merge_system_rule": true,
+      "rule": "Tool definitions. Additionally report: a tool name not starting with list_, get_, save_ or an explicit verb (send_, cancel_, respond_, share_, update_, download_, upload_, find_); a prefix such as m365_, graph_ or mcp_; a description shorter than three sentences or one that only restates the name; an irreversible tool whose description does not say it cannot be undone; nested object arguments where a scalar or list of scalars works; an action argument typed as str instead of a Literal enum; an argument whose name is not self-explanatory but has no description."
+    },
+    {
+      "path": "tests/**/*.py",
+      "merge_system_rule": true,
+      "rule": "Tests. Report: a test that calls a real Microsoft tenant without the 'live' pytest marker; a test with no assertion or that asserts only that no exception was raised; a negative-scenario test that does not assert isError and the error text; a streaming test whose fake does not reproduce the stream being closed; a test that would still pass if the behaviour it names were removed."
+    }
+  ],
+  "exclude": ["**/fixtures/**"]
+}
