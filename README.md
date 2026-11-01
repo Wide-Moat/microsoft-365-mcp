@@ -1,5 +1,8 @@
 # m365-mcp
 
+[![validate](https://github.com/Wide-Moat/microsoft-365-mcp/actions/workflows/validate.yml/badge.svg)](https://github.com/Wide-Moat/microsoft-365-mcp/actions/workflows/validate.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-0c0c0d)](LICENSE)
+
 An MCP server that gives an AI assistant one person's Microsoft 365 through Microsoft Graph. It
 covers mail, calendar and scheduling, contacts, OneDrive and SharePoint files, SharePoint lists,
 Excel, Teams, meeting recordings, To Do and Planner, and OneNote. It acts as that person, with their
@@ -73,34 +76,51 @@ code.
 
 ## How it compares
 
-Facts as published by each project on 29 October 2026, with sources. Corrections are welcome.
+Microsoft ships its own MCP servers for Microsoft 365. They are good at what they are built for, and
+they are built for something different: Microsoft hosts them, prices them with Copilot, and exposes
+Graph generically. This server is self-hosted, free, and shaped around the questions a person asks.
+Facts as Microsoft and each project published them on 1 November 2026; every cell has a source below.
+Corrections are welcome.
 
-| | **m365-mcp** | [Softeria ms-365-mcp-server][softeria] | [Work IQ MCP][workiq] (Microsoft) | [MCP Server for Enterprise][enterprise] (Microsoft) |
-|---|---|---|---|---|
-| Shape | 39 task-shaped tools (43 with every area on) | "300+ tools", one per Graph endpoint | 12 generic tools over resource paths (`fetch`, `create_entity`, `do_action`, …) | 3 tools: suggest a query, run a read-only `GET`, list properties |
-| Scope | One person's mail, calendar, files, lists, Excel, Teams, tasks, notes | Most of Graph | Microsoft 365 data and Copilot | Entra identity and directory, **read-only** |
-| Hosting | Self-hosted container | Self-hosted (npm) | Microsoft-hosted endpoint, or a local CLI | Microsoft-hosted only |
-| Cost | Free, Apache-2.0 | Free, MIT | Usage-based, paid in Copilot Credits | No extra cost |
-| Sending mail | Draft, then send after confirmation; only drafts the server created | Not described | `do_action /me/sendMail` | Not available (read-only) |
-| HTML mail | Cleaned both ways: CSS inlined, active content removed, `data:` images become attachments | Body returned as HTML on request | Not described | n/a |
-| Files | Streamed through signed links of at most 15 minutes, never through the model | Attachment download through single-use tickets | `fetch_blob` | n/a |
-| Status | Used in production | Community project | Generally available (Copilot Studio integration in preview) | Preview |
+| | **m365-mcp** | [Work IQ MCP][workiq] (Microsoft) | [Mail, Calendar, Teams… servers][mail] (Microsoft, Copilot Studio) | [MCP Server for Enterprise][enterprise] (Microsoft) | [Softeria ms-365-mcp-server][softeria] (community) |
+|---|---|---|---|---|---|
+| Shape | 39 task-shaped tools (43 with every area on) | 12 generic tools over Graph resource paths (`fetch`, `create_entity`, `do_action`, …) | One tool per Graph operation, per workload (Mail: 10) | 3 tools: suggest a query, run a read-only `GET`, list properties | "300+ tools", one per Graph endpoint |
+| Scope | One person's mail, calendar, files, lists, Excel, Teams, tasks, notes | Microsoft 365 data, Copilot and agents | One workload each | Entra identity and directory, **read-only** | Most of Graph |
+| Status | Used in production | Generally available | Preview, "only intended for backward compatibility" | Preview | Community project |
+| Hosting | Self-hosted container, inside your network | Microsoft-hosted endpoint, or a local CLI | Microsoft-hosted | Microsoft-hosted | Self-hosted (npm) |
+| Cost | Free, Apache-2.0 | Usage-based, in Copilot Credits | Copilot Studio | No extra cost | Free, MIT |
+| Writes | On, each behind its own guard (below) | Blocked by default by tenant policy; an administrator enables them | Direct (`sendMail` sends) | None | On, or `--read-only` |
+| Sending mail | Two calls: `save_draft`, then `send_draft` with `user_confirmed` (a flag the client sets after asking the person); only drafts this server created can be sent; 20 recipients at most, no distribution lists | `do_action` on `/me/sendMail` | `sendMail`, or `sendDraft` | n/a | Not described |
+| Files | Streamed through signed, short-lived links (15 minutes at most); bytes never pass through the model | `fetch_blob`: the whole file as Base64 in the result, 4 MB by default | Not described | n/a | Single-use download tickets |
+| Throttling | Honours Graph's `Retry-After`, bounded retries | No automatic retries; the client decides | Not described | 100 calls a minute per user | Per-IP rate limit on its HTTP endpoint |
+| HTML mail | Cleaned both ways: CSS inlined, active content removed, `data:` images become attachments; hidden text dropped on read | Not described | HTML passed as given | n/a | Body returned as HTML on request |
+| Text from other people | Marked as data, not instructions | Not described | Not described | n/a | Not described |
 
-[softeria]: https://github.com/Softeria/ms-365-mcp-server
 [workiq]: https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/mcp/overview
+[workiq-tools]: https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/mcp/tool-reference
+[workiq-api]: https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/api-overview#licensing-requirements
+[agent365]: https://learn.microsoft.com/en-us/microsoft-agent-365/tooling-servers-overview
+[mail]: https://learn.microsoft.com/en-us/microsoft-copilot-studio/mcp-mail-tools
 [enterprise]: https://learn.microsoft.com/en-us/graph/mcp-server/overview
+[softeria]: https://github.com/Softeria/ms-365-mcp-server
 
-Sources for the comparison:
+Sources:
 
-- **Softeria:** the [README][softeria] ("300+ tools", "maps 1-to-1 to a Graph API endpoint", the
-  MIT licence).
-- **Work IQ:** the tool list is from the [MCP overview][workiq]. Billing ("usage-based model that
-  uses Copilot Credits") is from the
-  [Work IQ API licensing section](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/api-overview#licensing-requirements).
-  The availability status is from the
-  [Agent 365 overview](https://learn.microsoft.com/en-us/microsoft-agent-365/tooling-servers-overview).
-- **MCP Server for Enterprise:** the [overview][enterprise] (tools, the read-only scope, "no
-  additional cost", the preview status).
+- **Work IQ MCP.** The tool list, writes "blocked by default" by tenant policy, `fetch_blob`'s Base64
+  and its 4 MB default, and "The server doesn't perform automatic retries" are from the
+  [tool reference][workiq-tools]. The design ("Fewer tools, more paths") is from the
+  [overview][workiq]. Billing ("usage-based model that uses Copilot Credits") is from the
+  [Work IQ API licensing section][workiq-api]. General availability is from the
+  [Agent 365 overview][agent365].
+- **The workload servers (Mail, Calendar, Teams, …).** The Mail tools, the preview status and "only
+  intended for backward compatibility purposes and shouldn't be used in production environments or new
+  projects" are from the [Mail reference][mail]; the same note is in the [Agent 365 overview][agent365].
+- **MCP Server for Enterprise.** The tools, the read-only scope, "no additional cost", 100 calls a minute
+  per user and the preview status are from its [overview][enterprise].
+- **Softeria.** "300+ tools", "maps 1-to-1 to a Graph API endpoint", read-only mode, the HTTP rate limit
+  and the MIT licence are from its [README][softeria].
+- **m365-mcp.** Every claim is a test in this repository: see [How it is tested](#how-it-is-tested) and
+  [`docs/requirements.md`](docs/requirements.md).
 
 ## Run
 
@@ -162,6 +182,11 @@ coding workspaces, a model gateway with per-person keys and connectors like this
 platform on your cluster. This server is one part of it.
 
 If you want the platform, not only the connector, write to us through the site.
+
+## Contributing and security
+
+[CONTRIBUTING.md](CONTRIBUTING.md) says how a change is made and checked; report a vulnerability
+privately as [SECURITY.md](SECURITY.md) describes, never in a public issue.
 
 ## Licence
 

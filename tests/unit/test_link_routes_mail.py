@@ -212,7 +212,7 @@ def test_a_body_cannot_be_uploaded_to_a_draft_already_sent(rt, graph, client):
     assert r.status_code == 422 and "already sent" in r.text and graph.writes() == []
 
 
-@pytest.mark.parametrize("name", ["Reunión_presupuesto.docx", "family \U0001f468\u200d\U0001f469\u200d\U0001f467.png", "qa7-\u043e\u0442\u0447\u0451\u0442.txt", "emoji 📎.txt"])
+@pytest.mark.parametrize("name", ["Reunión_presupuesto.docx", "family \U0001f468\u200d\U0001f469\u200d\U0001f467.png", "\u03b1\u03bd\u03b1\u03c6\u03bf\u03c1\u03ac.txt", "emoji 📎.txt"])
 def test_a_utf8_file_name_is_kept_as_sent(rt, graph, client, name):
     # curl sends the header's UTF-8 bytes; read as Latin-1 they became
     # "ReuniÃ³n_presupuesto.docx", in the draft and at the recipient.
