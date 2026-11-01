@@ -1,6 +1,7 @@
 # Microsoft 365 connector for AI agents
 
-`m365-mcp`: free and open source, Apache-2.0.
+Free and open source (Apache-2.0). It lets an AI agent work in a person's Outlook, calendar, Teams,
+OneDrive and the rest of Microsoft 365, with the smallest context and tools that do the work.
 
 [![validate](https://github.com/Wide-Moat/microsoft-365-mcp/actions/workflows/validate.yml/badge.svg)](https://github.com/Wide-Moat/microsoft-365-mcp/actions/workflows/validate.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-0c0c0d)](LICENSE)
@@ -154,7 +155,7 @@ Every safety rule has a test, and each test has been seen failing once with its 
 docker run -p 8000:8000 -p 8001:8001 \
   -e M365_LINK_SECRET='<32+ random characters>' \
   -e M365_LINKS_BASE_URL='https://<public address of port 8001>' \
-  ghcr.io/wide-moat/microsoft-365-mcp:<version>
+  ghcr.io/wide-moat/microsoft-365-mcp:v0.1.0
 ```
 
 It needs an Entra app, an administrator's consent and a gateway that signs each person in to Microsoft.
@@ -180,8 +181,8 @@ The [setup guide](docs/setup/README.md) walks through all of it, step by step.
 
 [Wide Moat](https://widemoat.ai) runs AI agents for companies on their own infrastructure: chat,
 coding workspaces, a model gateway with per-person keys and connectors like this one, all in one
-platform on your cluster. This server is one part of it. To get the platform and not only the
-connector, write to us through the site.
+platform on your cluster. This server is one part of it. If you want the whole platform, write to us
+through the site.
 
 ## Contributing and security
 

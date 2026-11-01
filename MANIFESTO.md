@@ -19,7 +19,7 @@ The servers that already exist for Microsoft 365 take one of two shapes. Both fa
   must know Graph by heart, and nothing between it and the mailbox knows what a letter is.
 
 We build a third shape: **few tools, each answering one question a person actually asks**, with
-the server doing the work that Graph leaves to the caller — resolving names, expanding recurrences,
+the server doing the work that Graph leaves to the caller: resolving names, expanding recurrences,
 cleaning HTML, streaming files, refusing what must not happen.
 
 The shape follows Linear's own MCP server: a small set of `list_`, `get_`, `save_` verbs over the
@@ -37,14 +37,14 @@ objects a person thinks in.
    *Violation:* an `action: str`; an enum behind a `$ref`.
 4. **No prefix.** The gateway already namespaces tools. *Violation:* `m365_`, `graph_`, `mcp_` in a
    tool name.
-5. **Descriptions read like a man page and say when to call the tool**, not only what it does. At
+5. **Descriptions read like a man page: what the tool does and when to call it.** At
    least three sentences; irreversible tools say they are irreversible. No shouting, no examples
    that the model will copy verbatim. *Violation:* a description that restates the tool name.
 6. **Flat arguments.** No nested objects where a scalar or a list of scalars will do. Every argument
    whose name is not self-explanatory has a description; no description restates its name.
 7. **The server resolves names.** People by name or address, folders by name or path, sites by name,
    time as a local string in the person's mailbox time zone (`2026-10-23 15:00`), duration in
-   minutes. **Ambiguity is an error that lists the candidates** — never the first match.
+   minutes. **Ambiguity is an error that lists the candidates**, never the first match.
    *Violation:* an argument that requires a Graph id the model could only have guessed.
 8. **Projections, never raw Graph.** Each object has a projection that keeps the fields a person
    needs. *Violation:* a tool returning `@odata.*`, `changeKey`, `etag`, nested `emailAddress`
@@ -167,7 +167,7 @@ person's word; everything else stays reversible.**
     [`docs/requirements.md`](docs/requirements.md) is a test.
 37. **The suite cannot pass empty.** CI counts the tests defined and the tests run, and fails when
     they differ or when the count is implausibly low.
-38. **No content in logs.** No subjects, bodies, addresses, file names or search strings — in log
+38. **No content in logs.** No subjects, bodies, addresses, file names or search strings in log
     lines or in exception messages, which end up in logs. A test asserts it.
 39. **Graph quirks live in one place.** The Graph client sets `Prefer: IdType="ImmutableId"` on every
     request and keeps times in UTC on the wire (the server converts them to the person's time zone),
