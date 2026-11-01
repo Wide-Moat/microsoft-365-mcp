@@ -730,7 +730,7 @@ Graph throttles per app and person; the client paces below the limits instead of
 **Administrator consent is given once, at installation.** The customer's administrator opens one
 consent link and accepts every scope of the enabled areas for the whole organisation; after that
 each person only signs in. The scopes marked **yes** are delegated — the server still sees only
-what the person can see — Microsoft simply does not let a person grant them alone. Without that
+what the person can see — Microsoft does not let a person grant them alone. Without that
 consent Microsoft stops every person's sign-in at "Need admin approval", because the gateway asks for
 all scopes in one sign-in: the consent is a prerequisite of the connector, not of five features. An
 organisation that refuses those five scopes gets a connector entry without them and the matching

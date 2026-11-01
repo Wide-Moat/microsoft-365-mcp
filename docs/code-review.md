@@ -36,7 +36,7 @@ A change with any of these does not merge.
 The author answers each of these in the pull request, even when the answer is "not applicable".
 
 - **What does the model see?** Paste the tool's description and a real (redacted) result.
-- **What does it cost?** The catalogue's token count before and after (`make budget`).
+- **What does it cost?** The catalogue's token count before and after (`python -m m365_mcp.budget`).
 - **What can the person not undo?** List every effect visible to other people and how it is gated.
 - **What does Graph actually do?** For any new Graph call, the live finding or the recorded fixture
   it was checked against — not the documentation alone.

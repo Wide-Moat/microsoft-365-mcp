@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — first public release
+## 0.1.0: first public release
 
 - 39 task-shaped tools over Microsoft Graph (43 with every area on): mail, calendar and scheduling,
   contacts, OneDrive and SharePoint files, SharePoint lists, Excel, Teams, To Do and Planner, OneNote,
