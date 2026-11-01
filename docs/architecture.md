@@ -22,8 +22,8 @@ flowchart LR
 - **m365-mcp** keeps no state beyond the minutes a file link lives. It receives a call carrying a
   bearer token for Graph, does the work, and returns a projection. The open links are held in its
   memory (short ids, below), so it runs as one replica, and a restart loses the open links.
-- **The sandbox** is where the agent runs shell commands. It moves bytes — attachments, files,
-  recordings, HTML letters — through short-lived signed links, so bytes never pass through the
+- **The sandbox** is where the agent runs shell commands. It moves bytes (attachments, files,
+  recordings, HTML letters) through short-lived signed links, so bytes never pass through the
   model.
 
 ## Components
@@ -81,7 +81,7 @@ any call that others will see; `projections` are the only way a Graph object rea
    error.
 5. Signed links carry the person's identity, but not their token: a link request arrives without
    a bearer. So the link payload carries an **encrypted** copy of the access token (AES-GCM, key
-   separate from the signing key), valid only until the link expires — at most 15 minutes and
+   separate from the signing key), valid only until the link expires, at most 15 minutes and
    never past the token's own expiry. The link the agent receives is a short random id; the signed
    value it stands for waits in the server's memory until the link expires (a signed
    value is ~6,300 characters, and every one cost the model's context). Nothing is written to disk.
@@ -139,7 +139,7 @@ but a valid signed link.
 | Threat | Stop |
 |---|---|
 | A prompt injection asks to forward mail, add a rule, share a folder publicly | Those operations do not exist |
-| An injection asks to send something | Draft first, `user_confirmed`, the bucket, recipient caps, the allowed recipient domains when set. `user_confirmed` is a boolean the model sets: it records that the model says the person agreed, and the server cannot check that they did. A model that follows the injection can set it, so what bounds the damage is structural — only a draft the person can see in Outlook is sent, at most 20 recipients, no lists, 10 sends at once, and only the allowed domains when the installation sets them. A client that shows each confirmed call to the person before it runs is what turns the flag into their word |
+| An injection asks to send something | Draft first, `user_confirmed`, the bucket, recipient caps, the allowed recipient domains when set. `user_confirmed` is a boolean the model sets: it records that the model says the person agreed, and the server cannot check that they did. A model that follows the injection can set it, so what bounds the damage is structural: only a draft the person can see in Outlook is sent, at most 20 recipients, no lists, 10 sends at once, and only the allowed domains when the installation sets them. A client that shows each confirmed call to the person before it runs is what turns the flag into their word |
 | An injection asks to read someone else's mailbox | No mailbox argument; Graph enforces the person's rights |
 | A leaked signed link | Expires in minutes, bound to one object, one operation, one person |
 | A leaked log | No content, no addresses, no tokens in logs |
