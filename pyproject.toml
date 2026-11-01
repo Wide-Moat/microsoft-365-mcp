@@ -10,7 +10,7 @@ dependencies = [
   "pydantic==2.14.1",
   "nh3==0.3.7",
   "css-inline==0.23.1",
-  "cryptography>=46",
+  "cryptography>=50.0.2",
   "uvicorn==0.54.0",
   "prometheus-client>=0.26.0",
 ]
