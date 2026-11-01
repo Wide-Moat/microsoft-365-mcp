@@ -3,22 +3,22 @@
 This server gives an AI assistant the Microsoft 365 of **one person**: their mail, their calendar,
 their files, their Teams. It acts as that person, with that person's rights, and with nothing more.
 
-Everything here is a rule, not a preference. A rule that the code can break without a test going
+Everything here is a rule. A rule that the code can break without a test going
 red is a defect in the tests. Every rule below names what a violation looks like, so that a
 reviewer can find one and a test can fail on one.
 
 ## Why this exists
 
-The servers that already exist for Microsoft 365 fall into two shapes, and both are wrong.
+The servers that already exist for Microsoft 365 take one of two shapes. Both fail.
 
 - **Graph, one to one.** One tool per Graph endpoint: 362 tools and about 575,000 tokens of
   description for one well-known open-source server; 54 tools and 75,000 tokens for mail alone.
   The model spends its context reading the catalogue and its calls choosing between near-identical
   tools, and every answer is raw Graph JSON.
-- **Graph, as a path.** A dozen generic tools — fetch a path, create an entity at a path. The model
+- **Graph, as a path.** A dozen generic tools: fetch a path, create an entity at a path. The model
   must know Graph by heart, and nothing between it and the mailbox knows what a letter is.
 
-We build the third shape: **few tools, each answering one question a person actually asks**, with
+We build a third shape: **few tools, each answering one question a person actually asks**, with
 the server doing the work that Graph leaves to the caller — resolving names, expanding recurrences,
 cleaning HTML, streaming files, refusing what must not happen.
 
@@ -71,7 +71,7 @@ objects a person thinks in.
     area on every change; CI prints the table and the pull request shows it before and after. The
     default catalogue (every area that is on by default) stays under **16,000 tokens**, no area over
     3,500, no tool over 600. Growing
-    past any of these is a decision recorded in an ADR, not an edit.
+    past any of these needs a decision written in the pull request that raises it, with the measured cost.
 
 ## II. Acting as one person
 
@@ -92,7 +92,7 @@ objects a person thinks in.
 
 ## III. Care with what cannot be undone
 
-The rule is not "never write". It is: **what other people see, or what cannot come back, needs the
+The rule is: **what other people see, or what cannot come back, needs the
 person's word; everything else stays reversible.**
 
 19. **Deletion goes to a bin.** Mail moves to Deleted Items (and returns with `move`); files go to
@@ -109,7 +109,7 @@ person's word; everything else stays reversible.**
     Teams message, inviting, rescheduling or cancelling a meeting, sharing a file outside the
     people already on it, turning on an automatic reply (everyone who writes receives its text),
     booking or cancelling a customer appointment. The model sets it only when the person explicitly asked. Answering one's
-    own invitation does not need it — that is one's own record.
+    own invitation does not need it, because that is one's own record.
 22. **Rate.** All such actions draw from one token bucket per person: 10 at once, refilled at 10
     per minute. At most 20 recipients per action; distribution lists are refused. Mass mailing is
     out of scope and the refusal says so.

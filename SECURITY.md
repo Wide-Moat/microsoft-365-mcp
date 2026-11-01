@@ -1,16 +1,15 @@
 # Security
 
 This server holds a person's delegated Microsoft Graph token for the length of one request and acts
-as that person. A defect here can read or send someone's mail, so reports are welcome and taken
-seriously.
+as that person. A defect here can read or send someone's mail. We want your report.
 
 ## Reporting a vulnerability
 
-Report it privately through GitHub: **Security → Report a vulnerability** on this repository. Please
-do not open a public issue for a vulnerability.
+Report it privately through GitHub: **Security → Report a vulnerability** on this repository. Do not open a public
+issue for a vulnerability.
 
 Include what you found, how to reproduce it, and what an attacker gains. We acknowledge a report
-within three working days and keep you informed until it is fixed.
+within three working days and tell you where it stands until it is fixed.
 
 ## Supported versions
 

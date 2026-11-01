@@ -145,7 +145,7 @@ but a valid signed link.
 | A leaked log | No content, no addresses, no tokens in logs |
 | A compromised gateway | Holds tokens already; this server adds no new secret except the link keys |
 | A compromised server pod | Sees tokens in flight, and the sealed copies behind open links (minutes; memory only, never disk) |
-| Throttling by Graph | Client paces below limits; honours `Retry-After`; reports honestly |
+| Throttling by Graph | Client paces below limits; honours `Retry-After`; tells the person how long to wait |
 | A large file exhausting memory | Streaming with spooled temp files; bounded chunk sizes |
 
 ## Deployment
