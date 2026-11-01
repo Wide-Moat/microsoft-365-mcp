@@ -71,7 +71,7 @@ objects a person thinks in.
     area on every change; CI prints the table and the pull request shows it before and after. The
     default catalogue (every area that is on by default) stays under **16,000 tokens**, no area over
     3,500, no tool over 600. Growing
-    past any of these needs a decision recorded in an ADR.
+    past any of these needs a decision written in the pull request that raises it, with the measured cost.
 
 ## II. Acting as one person
 

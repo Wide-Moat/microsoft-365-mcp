@@ -1,4 +1,6 @@
-# m365-mcp
+# Microsoft 365 connector for AI agents
+
+`m365-mcp`: free and open source, Apache-2.0.
 
 [![validate](https://github.com/Wide-Moat/microsoft-365-mcp/actions/workflows/validate.yml/badge.svg)](https://github.com/Wide-Moat/microsoft-365-mcp/actions/workflows/validate.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-0c0c0d)](LICENSE)
@@ -81,15 +83,15 @@ Every cell has a source below. Corrections are welcome.
 
 | | **m365-mcp** | [Work IQ MCP][workiq] (Microsoft) | [Mail, Calendar, Teams… servers][mail] (Microsoft, Copilot Studio) | [MCP Server for Enterprise][enterprise] (Microsoft) | [Softeria ms-365-mcp-server][softeria] (community) |
 |---|---|---|---|---|---|
-| Shape | 39 task-shaped tools (43 with every area on) | 12 generic tools over Graph resource paths (`fetch`, `create_entity`, `do_action`, …) | One tool per Graph operation, per workload (Mail: 10) | 3 tools: suggest a query, run a read-only `GET`, list properties | "300+ tools", one per Graph endpoint |
+| Shape | 39 task-shaped tools (43 with every area on) | 12 generic tools that read and write any Graph path | One tool per Graph operation, per workload (Mail: 10) | 3 tools: suggest a query, run a read-only request, list properties | "300+ tools", one per Graph endpoint |
 | Scope | One person's mail, calendar, files, lists, Excel, Teams, tasks, notes | Microsoft 365 data, Copilot and agents | One workload each | Entra identity and directory, **read-only** | Most of Graph |
 | Status | Used in production | Generally available | Preview, "only intended for backward compatibility" | Preview | Community project |
 | Hosting | Self-hosted container, inside your network | Microsoft-hosted endpoint, or a local CLI | Microsoft-hosted | Microsoft-hosted | Self-hosted (npm) |
 | Cost | Free, Apache-2.0 | Usage-based, in Copilot Credits | Copilot Studio | No extra cost | Free, MIT |
-| Writes | On, each behind its own guard | Blocked by default by tenant policy; an administrator enables them | Direct (`sendMail` sends) | None | On, or `--read-only` |
-| Sending mail | Two calls: write a draft, then send it with a confirmation flag the client sets after asking the person; only drafts this server created can be sent; 20 recipients at most, no distribution lists | `do_action` on `/me/sendMail` | `sendMail`, or `sendDraft` | n/a | Not described |
-| Files | Streamed through signed, short-lived links (15 minutes at most); bytes never pass through the model | `fetch_blob`: the whole file as Base64 in the result, 4 MB by default | Not described | n/a | Single-use download tickets |
-| Throttling | Honours Graph's `Retry-After`, bounded retries | No automatic retries; the client decides | Not described | 100 calls a minute per user | Per-IP rate limit on its HTTP endpoint |
+| Writes | On, each behind its own guard | Blocked by default by tenant policy; an administrator enables them | Direct: a send sends at once | None | On, or `--read-only` |
+| Sending mail | Two calls: write a draft, then send it with a confirmation flag the client sets after asking the person; only drafts this server created can be sent; 20 recipients at most, no distribution lists | A generic action on Graph's send endpoint | Sends at once, or sends a saved draft | n/a | Not described |
+| Files | Streamed through signed, short-lived links (15 minutes at most); bytes never pass through the model | The whole file as Base64 inside the result, 4 MB by default | Not described | n/a | Single-use download tickets |
+| Throttling | Waits as long as Microsoft asks, a bounded number of times | No automatic retries; the client decides | Not described | 100 calls a minute per user | Per-IP rate limit on its HTTP endpoint |
 | HTML mail | Cleaned both ways: CSS inlined, active content removed, `data:` images become attachments; hidden text dropped on read | Not described | HTML passed as given | n/a | Body returned as HTML on request |
 | Text from other people | Marked as data, not instructions | Not described | Not described | n/a | Not described |
 
@@ -103,8 +105,8 @@ Every cell has a source below. Corrections are welcome.
 
 Sources:
 
-- **Work IQ MCP.** The tool list, writes "blocked by default" by tenant policy, `fetch_blob`'s Base64
-  and its 4 MB default, and "The server doesn't perform automatic retries" are from the
+- **Work IQ MCP.** The tool list, writes "blocked by default" by tenant policy, file contents as Base64
+  with a 4 MB default, and "The server doesn't perform automatic retries" are from the
   [tool reference][workiq-tools]. The design ("Fewer tools, more paths") is from the
   [overview][workiq]. Billing ("usage-based model that uses Copilot Credits") is from the
   [Work IQ API licensing section][workiq-api]. General availability is from the
@@ -116,8 +118,9 @@ Sources:
   per user and the preview status are from its [overview][enterprise].
 - **Softeria.** "300+ tools", "maps 1-to-1 to a Graph API endpoint", read-only mode, the HTTP rate limit
   and the MIT licence are from its [README][softeria].
-- **m365-mcp.** Every claim is a test in this repository. See [How it is tested](#how-it-is-tested) and
-  [`docs/requirements.md`](docs/requirements.md).
+- **m365-mcp.** Each limit and refusal in its column is a test in this repository: see
+  [How it is tested](#how-it-is-tested) and [`docs/requirements.md`](docs/requirements.md). "Used in
+  production" means we run our own agents on it every day.
 
 ## How it is tested
 
@@ -137,37 +140,15 @@ Every safety rule has a test, and each test has been seen failing once with its 
 
 ## Quick start
 
-The setup guide is in [`docs/setup/README.md`](docs/setup/README.md). The short version:
-
 ```sh
-docker build -t m365-mcp .
 docker run -p 8000:8000 -p 8001:8001 \
-  -e M365_LINK_SIGNING_KEYS=<base64url, 32+ bytes> \
-  -e M365_LINK_ENCRYPTION_KEYS=<base64url, 32+ bytes> \
-  -e M365_LINKS_BASE_URL=https://<public host serving port 8001> \
-  m365-mcp
+  -e M365_LINK_SECRET='<32+ random characters>' \
+  -e M365_LINKS_BASE_URL='https://<public address of port 8001>' \
+  ghcr.io/wide-moat/microsoft-365-mcp:<version>
 ```
 
-The server needs a gateway: software in front of it that signs each person in to Microsoft and
-forwards their Graph token. The two ports:
-
-- **`:8000/mcp`** is the MCP endpoint (Streamable HTTP, stateless). Each request carries
-  `Authorization: Bearer <the person's Microsoft Graph token>`, supplied by the gateway. An optional
-  `X-M365-Areas: mail,calendar` header narrows the tools for one person.
-- **`:8001/d/…` and `:8001/u/…`** are the signed download and upload links for the agent's sandbox, the place where it runs shell commands.
-
-The settings:
-
-- `M365_AREAS` and `M365_SWITCHES` choose which areas and switches are on (see
-  [`docs/tools.md`](docs/tools.md)).
-- `M365_EXPECTED_CLIENT_IDS` is optional: the gateway's application (client) ids, comma-separated.
-  When set, a Graph token issued to any other application is refused
-  ([identity](docs/components/identity.md)).
-- `M365_ALLOWED_RECIPIENT_DOMAINS` is optional: the domains that mail, invitations, file invitations
-  and Teams messages may reach, comma-separated ([send guard](docs/components/guard.md)).
-
-The Graph permissions it asks for, and why, are in
-[`docs/requirements.md`](docs/requirements.md#permissions).
+It needs an Entra app, an administrator's consent and a gateway that signs each person in to Microsoft.
+The [setup guide](docs/setup/README.md) walks through all of it, step by step.
 
 ## Documents
 
