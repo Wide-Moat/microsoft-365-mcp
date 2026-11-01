@@ -12,7 +12,7 @@ dependencies = [
   "css-inline==0.23.0",
   "cryptography>=46",
   "uvicorn==0.54.0",
-  "prometheus-client>=0.23",
+  "prometheus-client>=0.26.0",
 ]
 
 [project.optional-dependencies]
