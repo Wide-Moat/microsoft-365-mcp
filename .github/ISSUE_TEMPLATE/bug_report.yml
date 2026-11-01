@@ -1,0 +1,31 @@
+name: Bug report
+description: Something the server does that it should not, or does not do that it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a security problem, do not open an issue: use Security → Report a vulnerability.
+        Never paste a token, a message body or a real address here.
+  - type: input
+    id: tool
+    attributes:
+      label: Tool
+      description: The tool that misbehaved, e.g. save_draft.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The arguments (with personal data replaced), and the result the server returned.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit

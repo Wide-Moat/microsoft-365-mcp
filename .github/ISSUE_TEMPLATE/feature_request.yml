@@ -1,0 +1,15 @@
+name: Feature request
+description: A question a person asks that the server cannot answer yet.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: The question a person would ask
+      description: In their words, e.g. "Which of my meetings next week have no agenda?"
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today
