@@ -29,6 +29,16 @@ The server acts as one person, with their own delegated sign-in (the person sign
 Microsoft account and the server uses only that person's rights) and nothing more. We run our own
 agents on it every day. The rules every change is held to are in the [manifesto](MANIFESTO.md).
 
+## How it looks
+
+A person connects Microsoft 365 once, with their own work account:
+
+![The connector list in a portal, with Microsoft 365 ready to connect](docs/images/1-connect.png)
+
+Connected, the whole connector costs the model about 1% of its context window:
+
+![Microsoft 365 connected; the gauge shows about 12.4k tokens, 1% of the model's context](docs/images/2-connected.png)
+
 ## What it does for a person
 
 **Outlook mail.** Finds and reads mail and whole threads, with attachments. Writes a draft as clean
