@@ -8,6 +8,8 @@ Looks at every file git tracks and reports, with file and line:
   *.invalid, localhost) and Microsoft's documentation tenants;
 - a Microsoft 365 tenant name: <tenant>.onmicrosoft.com or <tenant>[-my].sharepoint.com, unless the
   tenant is one of Microsoft's documentation placeholders (contoso, fabrikam, ...);
+- a Microsoft 365 tenant ID: a GUID on a line that says tenant or signs in to login.microsoftonline.com,
+  unless every group repeats one character (11111111-2222-..., 00000000-...);
 - a public IPv4 address (private, loopback, link-local and the RFC 5737 documentation ranges pass).
 
 Exit codes: 0 clean, 1 findings, 2 nothing was scanned (a check that read no file cannot pass).
@@ -25,6 +27,8 @@ PLACEHOLDER_TENANTS = ("contoso", "fabrikam", "northwind", "northwindtraders", "
                        "your-tenant", "example")
 EMAIL = re.compile(r"(?<![\w.%+-])[\w.%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 TENANT = re.compile(r"(?<![\w.*<{-])([A-Za-z0-9][A-Za-z0-9-]*)\.(?:sharepoint|onmicrosoft)\.com", re.I)
+GUID = re.compile(r"(?<![0-9A-Fa-f-])[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}(?![0-9A-Fa-f-])")
+TENANT_CONTEXT = re.compile(r"tenant|login\.microsoftonline\.com", re.I)
 IPV4 = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.]|/\d)")
 DOC_NETS = [ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")]
 
@@ -55,9 +59,15 @@ def _ip_ok(text: str) -> bool:
             or str(ip) == "255.255.255.255" or any(ip in n for n in DOC_NETS))
 
 
+def _guid_ok(guid: str) -> bool:
+    return all(len(set(group.lower())) == 1 for group in guid.split("-"))
+
+
 def findings(line: str) -> list[str]:
     out = [f"e-mail {m.group(0)}" for m in EMAIL.finditer(line) if not _email_ok(m.group(1))]
     out += [f"tenant {m.group(0)}" for m in TENANT.finditer(line) if not _tenant_ok(m.group(1))]
+    if TENANT_CONTEXT.search(line):
+        out += [f"tenant id {m.group(0)}" for m in GUID.finditer(line) if not _guid_ok(m.group(0))]
     out += [f"address {m.group(1)}" for m in IPV4.finditer(line) if not _ip_ok(m.group(1))]
     return out
 
