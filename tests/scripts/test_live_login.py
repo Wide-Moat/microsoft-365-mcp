@@ -102,9 +102,9 @@ def test_tenant_option_pins_sign_in_to_that_tenant(out, monkeypatch):
 
 
 def test_tenant_comes_from_the_environment_and_defaults_to_organizations(out, monkeypatch):
-    monkeypatch.setenv("M365_LIVE_TENANT", "04ee5f53-8c4d-42c3-bbf1-85a951bfddfd")
+    monkeypatch.setenv("M365_LIVE_TENANT", "11111111-2222-3333-4444-555555555555")
     seen = _sign_in_capturing_urls(monkeypatch, out, ["--client-id", "c", "--out", str(out), "--user", "a"])
-    assert all("/04ee5f53-8c4d-42c3-bbf1-85a951bfddfd/oauth2/v2.0/" in u for u in seen)
+    assert all("/11111111-2222-3333-4444-555555555555/oauth2/v2.0/" in u for u in seen)
     monkeypatch.delenv("M365_LIVE_TENANT")
     seen = _sign_in_capturing_urls(monkeypatch, out, ["--client-id", "c", "--out", str(out), "--user", "b"])
     assert all("/organizations/oauth2/v2.0/" in u for u in seen)

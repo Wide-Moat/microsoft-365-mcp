@@ -8,6 +8,7 @@ import pytest
 # Assembled from parts, so the fixtures that must fail do not trip a scan of this file.
 REAL_ADDRESS = "someone" + "@" + "acme.io"
 REAL_IP = ".".join(["8", "8", "4", "4"])
+REAL_TENANT_ID = "-".join(["3f2a9c1e", "7b4d", "4e8a", "9c21", "6d5b8f0e1a73"])
 
 _spec = importlib.util.spec_from_file_location("purity_check", Path(__file__).parents[2] / "scripts" / "purity_check.py")
 purity = importlib.util.module_from_spec(_spec)
@@ -20,6 +21,8 @@ _spec.loader.exec_module(purity)
     "login.microsoftonline.com/acmecorp.onmicrosoft.com/oauth2",
     "both contoso.sharepoint.com and acmecorp.sharepoint.com",
     f"server {REAL_IP} answered",
+    f'monkeypatch.setenv("M365_LIVE_TENANT", "{REAL_TENANT_ID}")',
+    f"https://login.microsoftonline.com/{REAL_TENANT_ID}/oauth2/v2.0/token",
 ])
 def test_real_data_is_a_finding(line):
     assert purity.findings(line)
@@ -32,6 +35,8 @@ def test_real_data_is_a_finding(line):
     "M365x123456.onmicrosoft.com and https://<tenant>.sharepoint.com",
     "bind 0.0.0.0, 127.0.0.1, 10.0.0.1, 192.168.1.1, 169.254.169.254, 203.0.113.7, 10.0.0.0/8",
     "version 1.2.3.4.5 and 999.1.1.1",
+    'tenant = "11111111-2222-3333-4444-555555555555" or 00000000-0000-0000-0000-000000000000',
+    f"a message id {REAL_TENANT_ID} on a line about mail",
 ])
 def test_placeholders_pass(line):
     assert purity.findings(line) == []
