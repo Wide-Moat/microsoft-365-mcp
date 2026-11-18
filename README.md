@@ -6,6 +6,12 @@ OneDrive and the rest of Microsoft 365, with the smallest context and tools that
 [![validate](https://github.com/Wide-Moat/microsoft-365-mcp/actions/workflows/validate.yml/badge.svg)](https://github.com/Wide-Moat/microsoft-365-mcp/actions/workflows/validate.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-0c0c0d)](LICENSE)
 
+| Your mailbox lives in | Use |
+|---|---|
+| Microsoft 365 / Exchange Online | **this server** (Microsoft Graph) |
+| Exchange Server in your own data centre (2016, 2019, Subscription Edition) | [exchange-mcp](https://github.com/Wide-Moat/exchange-mcp) (Exchange Web Services) |
+| Both, during a migration | both, one per mailbox location |
+
 ## What it is and why
 
 We tested the MCP servers that exist for Microsoft 365 and built our own. MCP, the Model Context
