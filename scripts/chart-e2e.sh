@@ -96,7 +96,12 @@ A=${pods[0]} B=${pods[1]} C=${pods[2]}
 IPA=$(ip "$A") IPB=$(ip "$B") IPC=$(ip "$C")
 echo "pods: A=$A ($IPA) B=$B ($IPB) C=$C ($IPC)"
 broken="$(mktemp -d)"
-trap 'rm -rf "$broken"' EXIT
+sampler=""
+finish() {
+  if [ -n "$sampler" ]; then kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null; fi
+  rm -rf "$broken"
+}
+trap finish EXIT
 probe() {  # run scripts/e2e-probe.py in a server container; a probe that cannot run breaks the whole run
   local p=$1 out rc
   shift
@@ -119,13 +124,21 @@ metrics() {  # the metrics page of the pod at $1, fetched from inside the cluste
   [ "$rc" = 0 ] || echo "metrics of $1 exited $rc: $(tail -2 <<<"$out")" >>"$broken/errors"
   echo "$out"
 }
-collect_logs() {  # every container's log of every pod now running, kept before a rollout replaces the pod
+snapshot=0
+collect_logs() {  # every container's log of every running pod, kept before a rollout replaces the pod
   local p c
+  snapshot=$((snapshot + 1))
   mkdir -p "$broken/logs"
-  for p in $(k get pod -l app.kubernetes.io/instance="$rel" -o jsonpath='{.items[*].metadata.name}'); do
+  for p in $(k get pod -l app.kubernetes.io/instance="$rel" --field-selector=status.phase=Running \
+    -o jsonpath='{.items[*].metadata.name}'); do
     for c in stage-keys server; do
-      k logs "$p" -c "$c" >"$broken/logs/$p.$c" 2>/dev/null || true
-      k logs "$p" -c "$c" --previous >"$broken/logs/$p.$c.previous" 2>/dev/null || true
+      # Each snapshot is a file of its own: a later one never replaces what an earlier one saw.
+      k logs "$p" -c "$c" >"$broken/logs/$p.$c.$snapshot" 2>"$broken/logerr" \
+        || echo "logs of $p/$c: $(head -1 "$broken/logerr")" >>"$broken/errors"
+      if [ "$(k get pod "$p" -o jsonpath="{.status.containerStatuses[?(@.name==\"$c\")].restartCount}")" -gt 0 ] 2>/dev/null; then
+        k logs "$p" -c "$c" --previous >"$broken/logs/$p.$c.$snapshot.previous" 2>/dev/null \
+          || echo "previous logs of $p/$c could not be read" >>"$broken/errors"
+      fi
     done
   done
 }
@@ -171,6 +184,7 @@ fi
 material=$(k get secret "$secret" -o json | jq -r '.data.key' | base64 -d | head -1 | cut -d: -f2)
 envs=$(timeout 60 kubectl -n "$ns" exec "$A" -c server -- env 2>&1)
 env_rc=$?
+[ "$env_rc" = 0 ] || echo "kubectl exec env on $A exited $env_rc: $(tail -1 <<<"$envs")" >>"$broken/errors"
 if [ "$env_rc" = 0 ] && grep -q '^M365_KEY_FILE=' <<<"$envs" && [ "${#material}" = 43 ] \
   && ! grep -qF -e "$material" -e "$pw" -e "$spw" <<<"$envs" && ! grep -q "M365_LINK_SECRET" <<<"$envs"; then
   pass "k2 no key and no store password in the environment a shell gets"
@@ -208,8 +222,9 @@ done
 took=$(( $(date +%s) - t0 ))
 sleep 6  # the store watch pings every 5 s: let the sampler see the store back
 kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null
+# Seen down, and seen up again after that: a 1 that follows the first 0.
 down_seen=no
-grep -q ' 0.0$' "$broken/store_up" 2>/dev/null && grep -q ' 1.0$' "$broken/store_up" && down_seen=yes
+awk '/ 0.0$/{down=1} down && / 1.0$/{back=1} END{exit !back}' "$broken/store_up" 2>/dev/null && down_seen=yes
 master_after=$(sentinel sentinel get-master-addr-by-name mymaster | head -1)
 after=$(for p in "${pods[@]}"; do restarts "$p"; done | tr '\n' ' ')
 if [ "$during" = state_unavailable ]; then pass "5a with the master gone a send fails closed (state_unavailable)"

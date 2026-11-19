@@ -84,7 +84,7 @@ disk for the upload spool. [Chart README](charts/microsoft-365-mcp/README.md).
 | `.github/workflows/known-bad.yml` | the same checks against 0.1.x, where they must fail |
 | `tests/unit/test_logs_json.py` | every line of the real processes parses as JSON |
 | `ruff format --check`, `ruff check` | in CI; the code base formatted once |
-| mutations | 23 new guards, and 12 of the store's scripts against each real server |
+| mutations | 24 new guards, and 12 of the store's scripts against each real server |
 
 ### Fixed
 

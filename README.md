@@ -148,7 +148,7 @@ Every safety rule has a test, and each test has been seen failing once with its 
 | Unit and contract tests (`pytest`) | Every tool against a recorded fake of Graph: arguments, results, errors, refusals | about 1,700 tests |
 | [Refusal map](docs/requirements.md) | Every "must refuse" row names an existing test | 200 refusal tests |
 | Refusal evidence (`scripts/refusal_evidence.py`) | Each row's guard is removed in turn and its test must fail | every row |
-| Mutation check (`scripts/mutation_check.py`) | Each safety rule is removed in turn and some test must fail | 92 mutations, and 12 more of the store's scripts against each real server |
+| Mutation check (`scripts/mutation_check.py`) | Each safety rule is removed in turn and some test must fail | 93 mutations, and 12 more of the store's scripts against each real server |
 | State store contract (`scripts/state-contract.sh`) | The shared state behaves the same in memory, on Redis, on Valkey and on both behind Sentinel | every pull request |
 | Chart in a cluster (`scripts/chart-e2e.sh`, kind) | Three replicas on Valkey behind Sentinel: one allowance and one set of links across pods, a master killed and failed over, the key delivered by the init container, every log line JSON, metrics on their own port, the autoscaler | 19 checks, every pull request |
 | Token budget (`python -m m365_mcp.budget --check`) | The default catalogue stays under 16,000 tokens; every area under 3,500 and every tool under 600 | every pull request |

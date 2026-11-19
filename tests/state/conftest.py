@@ -67,6 +67,8 @@ async def replicas(request) -> AsyncIterator[tuple]:
     kind = request.param
     # One backend alone (scripts/mutation_check.py --stores runs every mutant against each in turn).
     only = os.environ.get("M365_TEST_ONLY")
+    if only and only not in ("memory", *REAL):
+        pytest.fail(f"M365_TEST_ONLY={only}: one of memory, {', '.join(REAL)}")
     if only and kind != only:
         pytest.skip(f"M365_TEST_ONLY={only}")
     if kind == "memory":

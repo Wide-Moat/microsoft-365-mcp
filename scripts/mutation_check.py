@@ -723,6 +723,18 @@ MUTATIONS = [
         ],
         "tests/state/test_store_contract.py::test_an_upload_admitted_before_its_link_expired_still_holds_the_draft",
     ),
+    (
+        "a claim whose link expired is released under every key",
+        "links/store.py",
+        [
+            (
+                "        for state in [holder] if holder is not None else [state for state, _secret in self._gens]:\n"
+                "            await state.link_release(key)",
+                "        for state in [holder] if holder is not None else []:\n            await state.link_release(key)",
+            )
+        ],
+        "tests/unit/test_link_store.py",
+    ),
 ]
 # Mutations of the Lua scripts: they need the real stores, so scripts/state-contract.sh runs them
 # (python scripts/mutation_check.py --stores) in the network where Redis, Valkey and the Sentinels are.

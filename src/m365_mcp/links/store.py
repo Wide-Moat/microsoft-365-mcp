@@ -114,14 +114,19 @@ class LinkStore:
         return holder is not None and await holder.link_claim(key, hold=UPLOAD_HOLD)
 
     async def release(self, key: str, *, stored: bool = True) -> None:
-        """The upload did not deliver: the link may be used again until it expires."""
+        """The upload did not deliver: the link may be used again until it expires. A link whose value has
+        expired since its claim is found under no generation, so its claim is released under all of them:
+        a claim left behind would keep its draft busy for the whole hold."""
         holder = await self._holder(key, stored)
-        if holder is not None:
-            await holder.link_release(key)
+        for state in [holder] if holder is not None else [state for state, _secret in self._gens]:
+            await state.link_release(key)
 
     async def consume(self, key: str, until: float, *, stored: bool = True) -> None:
-        """The upload delivered: the link is spent, and a short id's stored value goes."""
-        await (await self._holder(key, stored) or self.state).link_consume(key, until=until)
+        """The upload delivered: the link is spent, and a short id's stored value goes. When its value has
+        expired since the claim, it is spent under every generation, for the same reason."""
+        holder = await self._holder(key, stored)
+        for state in [holder] if holder is not None else [state for state, _secret in self._gens]:
+            await state.link_consume(key, until=until)
 
     async def spent(self, key: str) -> bool:
         for state, _secret in self._gens:

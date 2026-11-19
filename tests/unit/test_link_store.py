@@ -117,3 +117,22 @@ async def test_memory_forgets_a_bucket_by_its_own_policy_not_the_callers():
     await mem.take("small", capacity=1, refill_per_second=1)  # 9 >= 1 must not forget "big"
     taken, left = await mem.take("big", capacity=10, refill_per_second=0.1)
     assert taken and round(left) == 8, "another policy's take refilled this bucket"
+
+
+async def test_an_upload_finishing_after_its_link_expired_frees_its_draft_during_a_rotation():
+    # Claimed under the previous key, its link then expires while the body arrives: the release (or the
+    # delivery) must still clear the claim, or send_draft waits for the whole hold.
+    now = [0.0]
+    mem = MemoryStore(clock=lambda: now[0])
+    old_key, new_key = b"o" * 32, b"n" * 32
+    before = LinkStore(mem, key=old_key)
+    after = LinkStore(mem, key=new_key, previous=(old_key,))
+    failed = await before.put("V", expires=10, owner="p", tag="draft:p:D1")
+    delivered = await before.put("W", expires=10, owner="p", tag="draft:p:D2")
+    assert await after.claim(failed) and await after.claim(delivered)
+    now[0] = 20.0
+    assert await after.busy_under("draft:p:D1") and await after.busy_under("draft:p:D2")
+    await after.release(failed)
+    await after.consume(delivered, until=30)
+    assert not await after.busy_under("draft:p:D1") and not await after.busy_under("draft:p:D2")
+    assert await after.spent(delivered)

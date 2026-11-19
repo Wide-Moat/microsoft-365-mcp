@@ -26,11 +26,13 @@ async def test_a_bucket_bursts_to_capacity_then_refuses(store):
 
 
 async def test_a_bucket_refills_with_time(store):
+    # A slow rate, so the first connection to a server (a Sentinel lookup) cannot refill it by itself.
+    await store.ping()
     for _ in range(2):
-        await store.take("p", capacity=2, refill_per_second=4)
-    assert not (await store.take("p", capacity=2, refill_per_second=4))[0]
-    await asyncio.sleep(0.4)  # 1.6 tokens back
-    assert (await store.take("p", capacity=2, refill_per_second=4))[0]
+        await store.take("p", capacity=2, refill_per_second=1)
+    assert not (await store.take("p", capacity=2, refill_per_second=1))[0]
+    await asyncio.sleep(1.2)  # a token and more back
+    assert (await store.take("p", capacity=2, refill_per_second=1))[0]
 
 
 async def test_two_replicas_draw_from_one_bucket(replicas):
