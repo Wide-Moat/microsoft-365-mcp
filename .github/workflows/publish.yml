@@ -136,9 +136,9 @@ jobs:
           echo "what an installation should pin: $IMAGE@$digest"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-  # <x.y> points at the newest <x.y.z> in the registry. One job at a time across every release: the list
-  # and the update cannot interleave with another release's. A run waiting here may be replaced by a
-  # newer one, which reads the registry afresh and sets the same newest tag.
+  # Each <x.y> points at the newest <x.y.z> in the registry. One job at a time across every release, so a
+  # list and its updates never interleave with another's; a run waiting here may be replaced by a newer
+  # one, which reads the registry afresh and sets every <x.y> again.
   alias:
     needs: image
     runs-on: ubuntu-latest
@@ -161,12 +161,14 @@ jobs:
           command -v skopeo >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q skopeo; }
           v="${GITHUB_REF_NAME#v}"
           echo "$TOKEN" | skopeo login ghcr.io -u "$ACTOR" --password-stdin
-          tags=$(skopeo list-tags "docker://$IMAGE" | jq -r --arg mm "${v%.*}" \
-            '.Tags[] | select(test("^[0-9]+[.][0-9]+[.][0-9]+$")) | select((split(".")[0:2] | join(".")) == $mm)')
+          tags=$(skopeo list-tags "docker://$IMAGE" | jq -r '.Tags[] | select(test("^[0-9]+[.][0-9]+[.][0-9]+$"))')
           grep -qxF "$v" <<<"$tags" || { echo "the registry does not list ${v} just pushed"; exit 1; }
-          newest=$(sort -V <<<"$tags" | tail -1)
-          skopeo copy --all --preserve-digests "docker://$IMAGE:$newest" "docker://$IMAGE:${v%.*}"
-          echo "${v%.*} -> ${newest}"
+          # Every <x.y>, not only this release's: a run that was replaced while waiting left its own undone.
+          for mm in $(cut -d. -f1-2 <<<"$tags" | sort -uV); do
+            newest=$(grep -E "^${mm//./[.]}[.][0-9]+$" <<<"$tags" | sort -V | tail -1)
+            skopeo copy --all --preserve-digests "docker://$IMAGE:$newest" "docker://$IMAGE:$mm"
+            echo "$mm -> $newest"
+          done
 
   chart:
     needs: image
