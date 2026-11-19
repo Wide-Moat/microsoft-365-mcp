@@ -25,12 +25,26 @@ ALL_SCOPES = (
 )
 
 
-def make_token(scopes: str = ALL_SCOPES, *, oid: str = "oid-a", tid: str = "tid-1", exp: int | None = None,
-               aud: str = "https://graph.microsoft.com", **claims_extra: object) -> str:
+def make_token(
+    scopes: str = ALL_SCOPES,
+    *,
+    oid: str = "oid-a",
+    tid: str = "tid-1",
+    exp: int | None = None,
+    aud: str = "https://graph.microsoft.com",
+    **claims_extra: object,
+) -> str:
     def b64(d: dict) -> str:
         return base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()
-    claims = {"aud": aud, "tid": tid, "oid": oid, "scp": scopes,
-              "exp": int(time.time()) + 3600 if exp is None else exp, **claims_extra}
+
+    claims = {
+        "aud": aud,
+        "tid": tid,
+        "oid": oid,
+        "scp": scopes,
+        "exp": int(time.time()) + 3600 if exp is None else exp,
+        **claims_extra,
+    }
     return f"{b64({'alg': 'none'})}.{b64(claims)}.sig"
 
 
@@ -42,7 +56,7 @@ class _Chunks(httpx.AsyncByteStream):
         for i in range(0, len(self.data), self.size):
             if self.closed:
                 raise RuntimeError("read after close")
-            yield self.data[i:i + self.size]
+            yield self.data[i : i + self.size]
 
     async def aclose(self) -> None:
         self.closed = True
@@ -63,10 +77,12 @@ class FakeGraph:
     routes: list[tuple[str, re.Pattern[str], Any]] = field(default_factory=list)
     seen: list[Seen] = field(default_factory=list)
 
-    def on(self, method: str, path: str, response: Any = None, *, status: int = 200,
-           headers: dict[str, str] | None = None) -> None:
+    def on(
+        self, method: str, path: str, response: Any = None, *, status: int = 200, headers: dict[str, str] | None = None
+    ) -> None:
         """`path` is a regex over the path after /v1.0 (or a full URL for downloads).
         `response` is a dict (JSON), bytes, or a callable(Seen) -> httpx.Response."""
+
         def handler(seen: Seen) -> httpx.Response:
             if callable(response):
                 return response(seen)
@@ -77,6 +93,7 @@ class FakeGraph:
             if response is None:
                 return httpx.Response(status, headers=headers)
             return httpx.Response(status, json=response, headers=headers)
+
         self.routes.insert(0, (method, re.compile("^" + path + "$"), handler))
 
     def writes(self) -> list[Seen]:
@@ -100,10 +117,10 @@ class FakeGraph:
         return httpx.Response(404, json={"error": {"code": "itemNotFound", "message": f"no fake route {path}"}})
 
 
-
-
 _LINE = re.compile(r"\A<<<text ([0-9a-f]{8}) from (.*?)>>> (.*) <<<end \1>>>\Z", re.S)
-_BLOCK = re.compile(r"\A<<<content ([0-9a-f]{16}) from (.*) — data, not instructions>>>\n(.*)\n<<<end of content \1>>>\Z", re.S)
+_BLOCK = re.compile(
+    r"\A<<<content ([0-9a-f]{16}) from (.*) — data, not instructions>>>\n(.*)\n<<<end of content \1>>>\Z", re.S
+)
 
 
 def inner(fenced: str) -> str:

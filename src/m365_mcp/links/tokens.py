@@ -20,10 +20,19 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from m365_mcp.config import LINK_TTL_CAP
 from m365_mcp.links.store import LinkStore
 
-KINDS = frozenset({
-    "attachment", "drive", "recording", "transcript", "note_resource",
-    "draft_body", "draft_attachment", "drive_upload", "note_body",
-})
+KINDS = frozenset(
+    {
+        "attachment",
+        "drive",
+        "recording",
+        "transcript",
+        "note_resource",
+        "draft_body",
+        "draft_attachment",
+        "drive_upload",
+        "note_body",
+    }
+)
 DOWNLOAD_KINDS = frozenset({"attachment", "drive", "recording", "transcript", "note_resource"})
 UPLOAD_KINDS = KINDS - DOWNLOAD_KINDS
 
@@ -60,8 +69,9 @@ class Link:
 
 
 class LinkSigner:
-    def __init__(self, sign_keys: tuple[bytes, ...], enc_keys: tuple[bytes, ...],
-                 store: LinkStore | None = None) -> None:
+    def __init__(
+        self, sign_keys: tuple[bytes, ...], enc_keys: tuple[bytes, ...], store: LinkStore | None = None
+    ) -> None:
         if not sign_keys or not enc_keys or any(len(k) < 32 for k in sign_keys + enc_keys):
             # Fail closed: a signer without keys is not a signer.
             raise ValueError("link keys are required")
@@ -76,9 +86,20 @@ class LinkSigner:
     def _mac(self, key: bytes, payload: bytes) -> str:
         return _b64(hmac.new(key, payload, hashlib.sha256).digest()[:16])
 
-    def issue(self, *, op: str, kind: str, target: dict[str, Any], person: str, token: str,
-              token_expires: int, ttl: int, max_bytes: int | None = None,
-              content_type: str | None = None, now: float | None = None) -> str:
+    def issue(
+        self,
+        *,
+        op: str,
+        kind: str,
+        target: dict[str, Any],
+        person: str,
+        token: str,
+        token_expires: int,
+        ttl: int,
+        max_bytes: int | None = None,
+        content_type: str | None = None,
+        now: float | None = None,
+    ) -> str:
         if op not in ("d", "u") or kind not in KINDS:
             raise ValueError("bad link")
         if (op == "d") != (kind in DOWNLOAD_KINDS):
@@ -157,8 +178,16 @@ class LinkSigner:
             if token is None:
                 raise LinkRefused()
             m = body.get("m") or {}
-            return Link(op=op, kind=body["k"], target=body["t"], person=body["p"], expires=body["e"],
-                        token=token, max_bytes=m.get("max"), content_type=m.get("ct"))
+            return Link(
+                op=op,
+                kind=body["k"],
+                target=body["t"],
+                person=body["p"],
+                expires=body["e"],
+                token=token,
+                max_bytes=m.get("max"),
+                content_type=m.get("ct"),
+            )
         except LinkRefused:
             raise
         except (KeyError, TypeError, ValueError, AttributeError):

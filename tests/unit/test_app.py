@@ -18,8 +18,11 @@ def test_the_application_starts_and_answers_health(settings: Settings) -> None:
 def test_the_mcp_endpoint_lists_tools_over_http(settings: Settings) -> None:
     main, _links = build(settings)
     with TestClient(main) as http:
-        r = http.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
-                      headers={"Accept": "application/json, text/event-stream"})
+        r = http.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            headers={"Accept": "application/json, text/event-stream"},
+        )
     assert r.status_code == 200
     names = {t["name"] for t in r.json()["result"]["tools"]}
     assert {"get_connection", "list_messages", "send_draft"} <= names
@@ -30,6 +33,7 @@ def test_uvicorn_logs_through_the_root_handlers_and_their_content_filter() -> No
 
     from m365_mcp.app import uvicorn_config
     from m365_mcp.observability import ContentFilter, configure_logging
+
     cfg = uvicorn_config(object(), 8001)
     assert cfg.log_config is None, "uvicorn's own dictConfig would give its loggers handlers outside the filter"
     for name in ("uvicorn", "uvicorn.error"):

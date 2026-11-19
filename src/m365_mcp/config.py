@@ -11,10 +11,10 @@ from m365_mcp.registry import AREAS
 # Switches inside areas. Each one needs a permission Microsoft lets only an administrator
 # grant; they are on by default because the administrator consents once at installation.
 SWITCHES: dict[str, bool] = {
-    "teams_channels": True,   # ChannelMessage.Read.All, ChannelMessage.ReadWrite
-    "transcripts": True,      # OnlineMeetingTranscript.Read.All
-    "rooms": True,            # Place.Read.All
-    "chat_admin": False,      # creating group chats and changing their members: people see it at once
+    "teams_channels": True,  # ChannelMessage.Read.All, ChannelMessage.ReadWrite
+    "transcripts": True,  # OnlineMeetingTranscript.Read.All
+    "rooms": True,  # Place.Read.All
+    "chat_admin": False,  # creating group chats and changing their members: people see it at once
 }
 
 LINK_TTL_DOWNLOAD = 300
@@ -112,8 +112,9 @@ class Settings:
         base = self.links_base_url
         parts = urlsplit(base)
         well_formed = bool(parts.hostname) and not parts.query and not parts.fragment
-        return bool(self.sign_keys and self.enc_keys and well_formed
-                    and (parts.scheme == "https" or _cluster_local(base)))
+        return bool(
+            self.sign_keys and self.enc_keys and well_formed and (parts.scheme == "https" or _cluster_local(base))
+        )
 
     def validate(self) -> None:
         # Mail, files, recordings, notes and Teams all move bytes through links. A server that

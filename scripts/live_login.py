@@ -25,8 +25,8 @@ import base64
 import json
 import os
 import re
-import tempfile
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -40,16 +40,34 @@ GRAPH = "https://graph.microsoft.com/"
 
 # docs/requirements.md "Permissions". People.Read is added because list_people ranks through /me/people.
 USER_SCOPES = [
-    "User.Read", "User.ReadBasic.All", "People.Read", "MailboxSettings.ReadWrite",
-    "Mail.ReadWrite", "Mail.Send",
-    "Calendars.ReadWrite", "Calendars.Read.Shared", "Presence.Read.All", "OnlineMeetings.Read",
-    "Files.ReadWrite.All", "Sites.ReadWrite.All", "Files.ReadWrite",
-    "Chat.ReadWrite", "ChatMessage.Send", "ChannelMessage.Send", "Team.ReadBasic.All", "Channel.ReadBasic.All",
-    "Contacts.ReadWrite", "Tasks.ReadWrite", "Notes.ReadWrite",
+    "User.Read",
+    "User.ReadBasic.All",
+    "People.Read",
+    "MailboxSettings.ReadWrite",
+    "Mail.ReadWrite",
+    "Mail.Send",
+    "Calendars.ReadWrite",
+    "Calendars.Read.Shared",
+    "Presence.Read.All",
+    "OnlineMeetings.Read",
+    "Files.ReadWrite.All",
+    "Sites.ReadWrite.All",
+    "Files.ReadWrite",
+    "Chat.ReadWrite",
+    "ChatMessage.Send",
+    "ChannelMessage.Send",
+    "Team.ReadBasic.All",
+    "Channel.ReadBasic.All",
+    "Contacts.ReadWrite",
+    "Tasks.ReadWrite",
+    "Notes.ReadWrite",
 ]
 ADMIN_SCOPES = [
-    "ChannelMessage.Read.All", "ChannelMessage.ReadWrite",
-    "OnlineMeetingRecording.Read.All", "OnlineMeetingTranscript.Read.All", "Place.Read.All",
+    "ChannelMessage.Read.All",
+    "ChannelMessage.ReadWrite",
+    "OnlineMeetingRecording.Read.All",
+    "OnlineMeetingTranscript.Read.All",
+    "Place.Read.All",
 ]
 
 
@@ -101,9 +119,14 @@ def device_login(http: httpx.Client, client_id: str, scope: str, label: str) -> 
     deadline = time.time() + int(dc["expires_in"])
     while time.time() < deadline:
         time.sleep(interval)
-        r = http.post(f"{AUTHORITY}/token", data={
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-            "client_id": client_id, "device_code": dc["device_code"]})
+        r = http.post(
+            f"{AUTHORITY}/token",
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "client_id": client_id,
+                "device_code": dc["device_code"],
+            },
+        )
         if r.status_code == 200:
             return stored(r.json())
         error = (r.json() if r.content else {}).get("error")
@@ -121,8 +144,10 @@ def refresh(http: httpx.Client, client_id: str, entry: dict, label: str) -> dict
     if not entry.get("refresh_token"):
         fail(f"user {label} has no refresh token; sign in again without --refresh")
     # No scope: the token endpoint then returns the scopes consented at sign-in.
-    r = http.post(f"{AUTHORITY}/token", data={
-        "grant_type": "refresh_token", "client_id": client_id, "refresh_token": entry["refresh_token"]})
+    r = http.post(
+        f"{AUTHORITY}/token",
+        data={"grant_type": "refresh_token", "client_id": client_id, "refresh_token": entry["refresh_token"]},
+    )
     if r.status_code != 200:
         fail(f"refresh of user {label} failed ({oauth_error(r)}); sign in again")
     new = stored(r.json())
@@ -148,11 +173,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default=".live-tokens.json", help="token file (default .live-tokens.json)")
     p.add_argument("--refresh", action="store_true", help="renew the users in the file from their refresh tokens")
     p.add_argument("--user", choices=("a", "b"), help="sign in only this user and keep the other one in the file")
-    p.add_argument("--no-admin-scopes", action="store_true", help="leave out the scopes that need administrator consent")
+    p.add_argument(
+        "--no-admin-scopes", action="store_true", help="leave out the scopes that need administrator consent"
+    )
     p.add_argument("--scopes", help="space or comma separated list replacing the default scopes")
-    p.add_argument("--client-id", default=os.environ.get("M365_LIVE_CLIENT_ID", ""), help="default: $M365_LIVE_CLIENT_ID")
-    p.add_argument("--tenant", default=os.environ.get("M365_LIVE_TENANT", "organizations"),
-                   help="tenant id or domain the test users belong to; default $M365_LIVE_TENANT or organizations")
+    p.add_argument(
+        "--client-id", default=os.environ.get("M365_LIVE_CLIENT_ID", ""), help="default: $M365_LIVE_CLIENT_ID"
+    )
+    p.add_argument(
+        "--tenant",
+        default=os.environ.get("M365_LIVE_TENANT", "organizations"),
+        help="tenant id or domain the test users belong to; default $M365_LIVE_TENANT or organizations",
+    )
     args = p.parse_args(argv)
     if not TENANT_RE.match(args.tenant) or ".." in args.tenant:
         fail(f"--tenant must be a tenant id or domain, got {args.tenant!r}")
@@ -170,7 +202,9 @@ def main(argv: list[str] | None = None) -> int:
                 fail(f"{out} has no users")
             for label in sorted(data):
                 data[label] = refresh(http, args.client_id, data[label], label)
-                print(f"user {label}: refreshed, valid for {(data[label]['expires_at'] - int(time.time())) // 60} minutes")
+                print(
+                    f"user {label}: refreshed, valid for {(data[label]['expires_at'] - int(time.time())) // 60} minutes"
+                )
             write(out, data)
             return 0
         if args.scopes:
@@ -183,14 +217,23 @@ def main(argv: list[str] | None = None) -> int:
         for label in (args.user,) if args.user else ("a", "b"):
             data[label] = device_login(http, args.client_id, scope, label)
             who = claims(data[label]["access_token"])
-            print(f"user {label}: signed in as {who.get('upn') or who.get('unique_name') or who.get('preferred_username') or 'unknown'}")
+            print(
+                f"user {label}: signed in as {who.get('upn') or who.get('unique_name') or who.get('preferred_username') or 'unknown'}"
+            )
         if {"a", "b"} <= data.keys():
             oa, ob = (claims(data[k]["access_token"]).get("oid") for k in ("a", "b"))
             if oa and oa == ob:
                 fail("both sign-ins are the same account; the suite needs two different users")
         write(out, data)
         missing = {"a", "b"} - data.keys()
-        print(f"\nwrote {out} (mode 0600). " + (f"Sign in user {missing.pop()} with --user, then run pytest -m live" if missing else "Run: pytest -m live"))
+        print(
+            f"\nwrote {out} (mode 0600). "
+            + (
+                f"Sign in user {missing.pop()} with --user, then run pytest -m live"
+                if missing
+                else "Run: pytest -m live"
+            )
+        )
     return 0
 
 

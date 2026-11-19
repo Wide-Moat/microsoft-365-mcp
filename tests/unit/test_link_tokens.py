@@ -15,8 +15,16 @@ def signer(sign=(K1,), enc=(E1,)):
 
 
 def issue(s=None, **kw):
-    args = dict(op="d", kind="attachment", target={"m": "MSG", "a": "ATT"}, person="p1", token="tok-abc",
-                token_expires=NOW + 3600, ttl=300, now=NOW)
+    args = dict(
+        op="d",
+        kind="attachment",
+        target={"m": "MSG", "a": "ATT"},
+        person="p1",
+        token="tok-abc",
+        token_expires=NOW + 3600,
+        ttl=300,
+        now=NOW,
+    )
     args.update(kw)
     return (s or signer()).issue(**args)
 
@@ -33,14 +41,17 @@ def test_the_token_is_not_readable_in_the_link():
     assert b"SECRET-BEARER" not in payload
 
 
-@pytest.mark.parametrize("mangle", [
-    lambda v: v[:-1] + ("A" if v[-1] != "A" else "B"),                     # signature byte
-    lambda v: "x" + v,                                                     # payload byte
-    lambda v: v.split(".")[0],                                             # no signature
-    lambda v: "",                                                          # empty
-    lambda v: "%%%.%%%",                                                   # not base64
-    lambda v: "e30." + v.split(".")[1],                                    # other payload, old signature
-])
+@pytest.mark.parametrize(
+    "mangle",
+    [
+        lambda v: v[:-1] + ("A" if v[-1] != "A" else "B"),  # signature byte
+        lambda v: "x" + v,  # payload byte
+        lambda v: v.split(".")[0],  # no signature
+        lambda v: "",  # empty
+        lambda v: "%%%.%%%",  # not base64
+        lambda v: "e30." + v.split(".")[1],  # other payload, old signature
+    ],
+)
 def test_tampered_or_garbage_links_are_refused(mangle):
     with pytest.raises(LinkRefused):
         signer().verify(mangle(issue()), op="d", now=NOW + 10)
@@ -100,8 +111,18 @@ def test_upload_kind_cannot_be_issued_as_a_download():
 
 def test_upload_carries_limits():
     s = signer()
-    v = s.issue(op="u", kind="draft_body", target={"d": "D"}, person="p1", token="t", token_expires=NOW + 3600,
-                ttl=180, max_bytes=2048, content_type="text/html", now=NOW)
+    v = s.issue(
+        op="u",
+        kind="draft_body",
+        target={"d": "D"},
+        person="p1",
+        token="t",
+        token_expires=NOW + 3600,
+        ttl=180,
+        max_bytes=2048,
+        content_type="text/html",
+        now=NOW,
+    )
     link = s.verify(v, op="u", now=NOW + 5)
     assert link.max_bytes == 2048 and link.content_type == "text/html"
 
@@ -110,11 +131,19 @@ def test_with_a_store_a_link_is_a_short_id_that_verifies_like_the_signed_value()
     # the signed value runs to ~6,300 characters; with a store the link carries a
     # 22-character id and the value stays on the server.
     from m365_mcp.links.store import LinkStore
+
     sign, enc = b"s" * 32, b"e" * 32
     signer = LinkSigner((sign,), (enc,), LinkStore())
     long_token = "t" * 4000
-    value = signer.issue(op="d", kind="drive", target={"i": "f1"}, person="p", token=long_token,
-                         token_expires=int(time.time()) + 3600, ttl=300)
+    value = signer.issue(
+        op="d",
+        kind="drive",
+        target={"i": "f1"},
+        person="p",
+        token=long_token,
+        token_expires=int(time.time()) + 3600,
+        ttl=300,
+    )
     assert len(value) < 40 and "." not in value
     link = signer.verify(value, op="d")
     assert link.token == long_token and link.target == {"i": "f1"}

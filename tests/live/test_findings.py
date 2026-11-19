@@ -13,11 +13,11 @@ import re
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
+import builders
 import httpx
 import pytest
-
-import builders
 from livekit import claims
+
 from m365_mcp.core.time import zone
 from m365_mcp.tools.teams import _member
 
@@ -38,8 +38,9 @@ async def chat_probe(live) -> tuple[str, str]:
             me = await live.raw(user, "GET", "/me", params={"$select": "id"})
             assert me.status_code == 200, live.error_of(me)
             ids[user] = me.json()["id"]
-        made = await live.raw("a", "POST", "/chats", json={
-            "chatType": "oneOnOne", "members": [_member(ids["a"]), _member(ids["b"])]})
+        made = await live.raw(
+            "a", "POST", "/chats", json={"chatType": "oneOnOne", "members": [_member(ids["a"]), _member(ids["b"])]}
+        )
         assert made.status_code in (200, 201), live.error_of(made)
         live.state["probe_chat"] = (made.json()["id"], ids["a"])
     return live.state["probe_chat"]
@@ -47,16 +48,20 @@ async def chat_probe(live) -> tuple[str, str]:
 
 async def post_chat(live, html: str) -> object:
     chat, me = await chat_probe(live)
-    resp = await live.raw("a", "POST", f"/chats/{chat}/messages", json={"body": {"contentType": "html", "content": html}})
+    resp = await live.raw(
+        "a", "POST", f"/chats/{chat}/messages", json={"body": {"contentType": "html", "content": html}}
+    )
 
     async def tidy() -> None:
         if resp.status_code == 201:
             await live.raw("a", "POST", f"/users/{me}/chats/{chat}/messages/{resp.json()['id']}/softDelete")
+
     live.later("probe chat message", tidy)
     return resp
 
 
 # -- Teams ----------------------------------------------------------------------------------------
+
 
 async def test_chat_send_permission(live):
     """ChatMessage.Send vs ChannelMessage.Send: what the token holds, whether a chat post succeeds, and
@@ -66,13 +71,17 @@ async def test_chat_send_permission(live):
     resp = await post_chat(live, f"<p>{live.run} permission probe</p>")
     narrowed = await live.refresh_with("a", ["User.Read", "Chat.ReadWrite"])
     held = set(claims(narrowed).get("scp", "").split())
-    live.finding("chat_send_scope", {
-        "token holds ChatMessage.Send": "ChatMessage.Send" in scopes,
-        "token holds ChannelMessage.Send": "ChannelMessage.Send" in scopes,
-        "chat post": observed_status(resp, live),
-        "refresh asking only User.Read Chat.ReadWrite still holds ChatMessage.Send": "ChatMessage.Send" in held,
-        "refresh asking only User.Read Chat.ReadWrite still holds ChannelMessage.Send": "ChannelMessage.Send" in held,
-    })
+    live.finding(
+        "chat_send_scope",
+        {
+            "token holds ChatMessage.Send": "ChatMessage.Send" in scopes,
+            "token holds ChannelMessage.Send": "ChannelMessage.Send" in scopes,
+            "chat post": observed_status(resp, live),
+            "refresh asking only User.Read Chat.ReadWrite still holds ChatMessage.Send": "ChatMessage.Send" in held,
+            "refresh asking only User.Read Chat.ReadWrite still holds ChannelMessage.Send": "ChannelMessage.Send"
+            in held,
+        },
+    )
     assert resp.status_code < 500
 
 
@@ -83,8 +92,10 @@ async def test_chat_soft_delete_endpoints_and_threaded_replies(live):
     message = sent.json()["id"]
 
     results = {}
-    for label, path in (("users/{me}", f"/users/{me}/chats/{chat}/messages/{message}"),
-                        ("me", f"/me/chats/{chat}/messages/{message}")):
+    for label, path in (
+        ("users/{me}", f"/users/{me}/chats/{chat}/messages/{message}"),
+        ("me", f"/me/chats/{chat}/messages/{message}"),
+    ):
         r = await live.raw("a", "POST", f"{path}/softDelete")
         results[f"softDelete via {label}"] = observed_status(r, live)
         if r.status_code < 300:
@@ -93,18 +104,48 @@ async def test_chat_soft_delete_endpoints_and_threaded_replies(live):
             break
     live.finding("chat_soft_delete_endpoint", results)
 
-    replied = await live.raw("a", "POST", f"/chats/{chat}/messages/{message}/replies",
-                             json={"body": {"content": f"{live.run} reply probe"}})
+    replied = await live.raw(
+        "a", "POST", f"/chats/{chat}/messages/{message}/replies", json={"body": {"content": f"{live.run} reply probe"}}
+    )
     live.finding("chat_threaded_replies", observed_status(replied, live))
 
 
 async def test_teams_html_tags_that_survive(live):
-    tags = ["p", "b", "strong", "i", "em", "u", "s", "h1", "h2", "ul", "ol", "li", "table", "thead", "tbody", "tr",
-            "th", "td", "pre", "code", "blockquote", "a", "br", "hr", "span", "div", "font"]
-    html = (f"<div>{live.run} tags<h1>h</h1><h2>h</h2><p><b>b</b><strong>s</strong><i>i</i><em>e</em><u>u</u><s>s</s>"
-            '<span style="color:red">span</span><font color="red">font</font><br><a href="https://example.com">a</a></p>'
-            "<ul><li>l</li></ul><ol><li>l</li></ol><blockquote>q</blockquote><pre>pre</pre><code>code</code><hr>"
-            "<table><thead><tr><th>h</th></tr></thead><tbody><tr><td>c</td></tr></tbody></table></div>")
+    tags = [
+        "p",
+        "b",
+        "strong",
+        "i",
+        "em",
+        "u",
+        "s",
+        "h1",
+        "h2",
+        "ul",
+        "ol",
+        "li",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "pre",
+        "code",
+        "blockquote",
+        "a",
+        "br",
+        "hr",
+        "span",
+        "div",
+        "font",
+    ]
+    html = (
+        f"<div>{live.run} tags<h1>h</h1><h2>h</h2><p><b>b</b><strong>s</strong><i>i</i><em>e</em><u>u</u><s>s</s>"
+        '<span style="color:red">span</span><font color="red">font</font><br><a href="https://example.com">a</a></p>'
+        "<ul><li>l</li></ul><ol><li>l</li></ol><blockquote>q</blockquote><pre>pre</pre><code>code</code><hr>"
+        "<table><thead><tr><th>h</th></tr></thead><tbody><tr><td>c</td></tr></tbody></table></div>"
+    )
     sent = await post_chat(live, html)
     if sent.status_code != 201:
         live.finding("teams_html_tags", {"post refused": live.error_of(sent)})
@@ -117,6 +158,7 @@ async def test_teams_html_tags_that_survive(live):
 
 
 # -- mail -----------------------------------------------------------------------------------------
+
 
 async def test_search_combined_with_filter_orderby(live):
     base = {"$search": '"m365-live"', "$top": "5", "$select": "id,subject"}
@@ -136,11 +178,16 @@ async def test_search_combined_with_filter_orderby(live):
 
 # -- calendar -------------------------------------------------------------------------------------
 
+
 async def test_calendar_view_filter_and_orderby(live):
     tz = zone((await live.ok("a", "get_connection"))["time_zone"])
     start = datetime.now(tz).date()
-    window = {"startDateTime": f"{start}T00:00:00Z", "endDateTime": f"{start + timedelta(days=14)}T00:00:00Z",
-              "$top": "5", "$select": "id,subject"}
+    window = {
+        "startDateTime": f"{start}T00:00:00Z",
+        "endDateTime": f"{start + timedelta(days=14)}T00:00:00Z",
+        "$top": "5",
+        "$select": "id,subject",
+    }
     cases = {
         "$filter only": {"$filter": "contains(subject,'x')"},
         "$orderby only": {"$orderby": "start/dateTime"},
@@ -155,6 +202,7 @@ async def test_calendar_view_filter_and_orderby(live):
 
 
 # -- files ----------------------------------------------------------------------------------------
+
 
 async def test_pdf_conversion_of_a_3mb_document(live):
     folder = await live.files_folder()
@@ -174,17 +222,28 @@ async def test_copy_monitor_host(live):
     item = await live.put_file(folder, f"{live.run}-copy-source.txt", b"copy me")
     meta = await live.raw("a", "GET", f"/me/drive/items/{item['id']}", params={"$select": "parentReference"})
     parent = meta.json()["parentReference"]
-    r = await live.raw("a", "POST", f"/me/drive/items/{item['id']}/copy", json={
-        "parentReference": {"driveId": parent["driveId"], "id": parent["id"]}, "name": f"{live.run}-copy.txt"})
+    r = await live.raw(
+        "a",
+        "POST",
+        f"/me/drive/items/{item['id']}/copy",
+        json={"parentReference": {"driveId": parent["driveId"], "id": parent["id"]}, "name": f"{live.run}-copy.txt"},
+    )
     assert r.status_code == 202, live.error_of(r)
     host = urlsplit(r.headers["location"]).hostname or ""
     # The first label names the tenant; the finding is about the suffix, and the document is public.
     shown = host if host == "graph.microsoft.com" else re.sub(r"^[^.]+?(-my)?\.", r"<tenant>\1.", host)
-    live.finding("copy_monitor_host", {"host": shown, "suffix accepted by Graph.MONITOR_HOSTS":
-                                       host.endswith((".sharepoint.com", ".onedrive.com", ".svc.ms")) or host == "graph.microsoft.com"})
+    live.finding(
+        "copy_monitor_host",
+        {
+            "host": shown,
+            "suffix accepted by Graph.MONITOR_HOSTS": host.endswith((".sharepoint.com", ".onedrive.com", ".svc.ms"))
+            or host == "graph.microsoft.com",
+        },
+    )
 
 
 # -- what deletion keeps ----------------------------------------------------------------------------
+
 
 async def deleted_items_count(live) -> int:
     r = await live.raw("a", "GET", "/me/mailFolders/deleteditems", params={"$select": "totalItemCount"})
@@ -200,16 +259,22 @@ async def test_where_a_deleted_contact_goes(live):
     await asyncio.sleep(10)
     after = await deleted_items_count(live)
     direct = await live.raw("a", "GET", f"/me/contacts/{contact}")
-    bin_ = await live.raw("a", "GET", "/me/contactFolders/deleteditems/contacts",
-                          params={"$top": "50", "$select": "displayName"})
+    bin_ = await live.raw(
+        "a", "GET", "/me/contactFolders/deleteditems/contacts", params={"$top": "50", "$select": "displayName"}
+    )
     in_bin = None
     if bin_.status_code == 200:
         in_bin = any(c.get("displayName") == name for c in bin_.json().get("value", []))
-    live.finding("deleted_contact_location", {
-        "GET the contact afterwards": direct.status_code,
-        "Deleted Items folder item count before/after": [before, after],
-        "contactFolders/deleteditems listing": observed_status(bin_, live) if bin_.status_code != 200 else f"ok, contact present: {in_bin}",
-    })
+    live.finding(
+        "deleted_contact_location",
+        {
+            "GET the contact afterwards": direct.status_code,
+            "Deleted Items folder item count before/after": [before, after],
+            "contactFolders/deleteditems listing": observed_status(bin_, live)
+            if bin_.status_code != 200
+            else f"ok, contact present: {in_bin}",
+        },
+    )
 
 
 async def test_whether_a_deleted_todo_task_is_recoverable(live):
@@ -219,12 +284,18 @@ async def test_whether_a_deleted_todo_task_is_recoverable(live):
     task = (await live.ok("a", "save_task", source="todo", title=title))["id"]
     await live.ok("a", "delete_task", id=task, source="todo", list=default["displayName"], user_confirmed=True)
     got = await live.raw("a", "GET", f"/me/todo/lists/{default['id']}/tasks/{task}")
-    listing = await live.raw("a", "GET", f"/me/todo/lists/{default['id']}/tasks",
-                             params={"$filter": f"title eq '{title}'"})
-    live.finding("deleted_todo_task", {
-        "GET the task afterwards": got.status_code,
-        "listed afterwards": [t["title"] for t in listing.json().get("value", [])] if listing.status_code == 200 else observed_status(listing, live),
-    })
+    listing = await live.raw(
+        "a", "GET", f"/me/todo/lists/{default['id']}/tasks", params={"$filter": f"title eq '{title}'"}
+    )
+    live.finding(
+        "deleted_todo_task",
+        {
+            "GET the task afterwards": got.status_code,
+            "listed afterwards": [t["title"] for t in listing.json().get("value", [])]
+            if listing.status_code == 200
+            else observed_status(listing, live),
+        },
+    )
 
 
 async def test_todo_paging(live):
@@ -237,7 +308,10 @@ async def test_todo_paging(live):
 
     async def one(i: int) -> int:
         async with gate:
-            return (await live.raw("a", "POST", f"/me/todo/lists/{lid}/tasks", json={"title": f"paging probe {i}"})).status_code
+            return (
+                await live.raw("a", "POST", f"/me/todo/lists/{lid}/tasks", json={"title": f"paging probe {i}"})
+            ).status_code
+
     codes = await asyncio.gather(*(one(i) for i in range(60)))
     assert codes.count(201) == 60, codes
     observed = {}
@@ -250,23 +324,30 @@ async def test_todo_paging(live):
 async def test_whether_a_deleted_onenote_page_is_recoverable(live):
     notebook, section = await live.notes_target()
     title = f"{live.run} deleted page"
-    page = (await live.ok("a", "save_note_page", title=title, body="gone soon", section=section, notebook=notebook))["id"]
+    page = (await live.ok("a", "save_note_page", title=title, body="gone soon", section=section, notebook=notebook))[
+        "id"
+    ]
     await live.ok("a", "delete_note_page", id=page, user_confirmed=True)
     got = await live.raw("a", "GET", f"/me/onenote/pages/{page}")
     content = await live.raw("a", "GET", f"/me/onenote/pages/{page}/content")
     listed = await live.ok("a", "list_notes", section=section, notebook=notebook, query=title)
-    live.finding("deleted_onenote_page", {
-        "GET the page afterwards": got.status_code,
-        "GET its content afterwards": content.status_code,
-        "listed in its section afterwards": any(p["id"] == page for p in listed["items"]),
-    })
+    live.finding(
+        "deleted_onenote_page",
+        {
+            "GET the page afterwards": got.status_code,
+            "GET its content afterwards": content.status_code,
+            "listed in its section afterwards": any(p["id"] == page for p in listed["items"]),
+        },
+    )
 
 
 async def test_whether_a_deleted_list_item_is_recoverable(live):
     sites = (await live.ok("a", "list_files", kind="site", include_lists=True, limit=25))["items"]
     for site in sites:
         for lst in site.get("lists", []):
-            made = await live.invoke("a", "save_list_item", site=site["id"], list=lst["id"], fields=[f"Title={live.run}"])
+            made = await live.invoke(
+                "a", "save_list_item", site=site["id"], list=lst["id"], fields=[f"Title={live.run}"]
+            )
             if made.error:
                 continue
             row = made.data["id"]
@@ -274,17 +355,23 @@ async def test_whether_a_deleted_list_item_is_recoverable(live):
             got = await live.raw("a", "GET", f"/sites/{site['id']}/lists/{lst['id']}/items/{row}")
             # v1.0 has no recycle bin for a site (400); beta reads it. Only this probe uses beta.
             binned = await live.raw("a", "GET", f"https://graph.microsoft.com/beta/sites/{site['id']}/recycleBin/items")
-            live.finding("deleted_list_item", {
-                "GET the item afterwards": got.status_code,
-                "in the site recycle bin (beta /recycleBin/items)": (
-                    any(i.get("title") == live.run for i in binned.json().get("value", []))
-                    if binned.status_code == 200 else observed_status(binned, live)),
-            })
+            live.finding(
+                "deleted_list_item",
+                {
+                    "GET the item afterwards": got.status_code,
+                    "in the site recycle bin (beta /recycleBin/items)": (
+                        any(i.get("title") == live.run for i in binned.json().get("value", []))
+                        if binned.status_code == 200
+                        else observed_status(binned, live)
+                    ),
+                },
+            )
             return
     pytest.skip("no SharePoint list with a writable Title column reachable by user A")
 
 
 # -- found by QA, round 2 -------------------------------------------------------------------------
+
 
 async def test_list_item_fields_expand_syntax(live):
     """How Graph wants the columns of list items selected inside $expand."""
@@ -293,8 +380,10 @@ async def test_list_item_fields_expand_syntax(live):
         for lst in site.get("lists", []):
             base = f"/sites/{site['id']}/lists/{lst['id']}/items"
             observed = {}
-            for label, expand in (("fields(select=Title)", "fields(select=Title)"),
-                                  ("fields($select=Title)", "fields($select=Title)")):
+            for label, expand in (
+                ("fields(select=Title)", "fields(select=Title)"),
+                ("fields($select=Title)", "fields($select=Title)"),
+            ):
                 resp = await live.raw("a", "GET", base, params={"$top": "1", "$expand": expand})
                 observed[label] = observed_status(resp, live)
             live.finding("list_items_expand_select", observed)
@@ -306,17 +395,24 @@ async def test_onenote_paging(live):
     """Whether OneNote sends a next link once $top is given, and whether it honours $skip."""
     notebook, section = await live.notes_target()
     for i in range(3):
-        await live.ok("a", "save_note_page", title=f"{live.run} paging {i}", body="x", section=section, notebook=notebook)
+        await live.ok(
+            "a", "save_note_page", title=f"{live.run} paging {i}", body="x", section=section, notebook=notebook
+        )
     secs = (await live.raw("a", "GET", "/me/onenote/sections", params={"$select": "id,displayName"})).json()["value"]
     sid = next(s["id"] for s in secs if s["displayName"] == section)
     base = f"/me/onenote/sections/{sid}/pages"
     order = {"$select": "id", "$orderby": "lastModifiedDateTime desc"}
     first = (await live.raw("a", "GET", base, params={**order, "$top": "1"})).json()
     second = (await live.raw("a", "GET", base, params={**order, "$top": "1", "$skip": "1"})).json()
-    live.finding("onenote_paging", {
-        "$top=1: items": len(first.get("value", [])), "$top=1: next link": "@odata.nextLink" in first,
-        "$skip=1 gives another page": bool(second.get("value")) and second["value"][0]["id"] != first["value"][0]["id"],
-    })
+    live.finding(
+        "onenote_paging",
+        {
+            "$top=1: items": len(first.get("value", [])),
+            "$top=1: next link": "@odata.nextLink" in first,
+            "$skip=1 gives another page": bool(second.get("value"))
+            and second["value"][0]["id"] != first["value"][0]["id"],
+        },
+    )
 
 
 async def test_onenote_title_after_a_fast_body_change(live):
@@ -331,7 +427,9 @@ async def test_onenote_title_after_a_fast_body_change(live):
         for attempt in range(3):
             title = f"{live.run} title {int(with_title)}{attempt}"
             doc = f"<!DOCTYPE html><html><head><title>{title}</title></head><body><p>x</p></body></html>"
-            made = await live.raw("a", "POST", base_path(sid), content=doc.encode(), headers={"Content-Type": "text/html"})
+            made = await live.raw(
+                "a", "POST", base_path(sid), content=doc.encode(), headers={"Content-Type": "text/html"}
+            )
             assert made.status_code == 201, live.error_of(made)
             page = made.json()["id"]
             live.later("probe page", lambda page=page: live.raw("a", "DELETE", f"/me/onenote/pages/{page}"))
@@ -356,32 +454,69 @@ def base_path(section_id: str) -> str:
 async def test_find_meeting_times_with_half_the_people_busy(live):
     """Whether findMeetingTimes offers a time when one of two required attendees is busy, at 50 and 0 percent."""
     day = (datetime.now() + timedelta(days=21)).date().isoformat()
-    made = await live.raw("b", "POST", "/me/events", json={
-        "subject": f"{live.run} busy", "showAs": "busy",
-        "start": {"dateTime": f"{day}T10:00:00", "timeZone": "UTC"}, "end": {"dateTime": f"{day}T12:00:00", "timeZone": "UTC"}})
+    made = await live.raw(
+        "b",
+        "POST",
+        "/me/events",
+        json={
+            "subject": f"{live.run} busy",
+            "showAs": "busy",
+            "start": {"dateTime": f"{day}T10:00:00", "timeZone": "UTC"},
+            "end": {"dateTime": f"{day}T12:00:00", "timeZone": "UTC"},
+        },
+    )
     assert made.status_code == 201, live.error_of(made)
     eid = made.json()["id"]
     live.later("busy event", lambda: live.raw("b", "DELETE", f"/me/events/{eid}"))
     b = await live.address("b")
 
     async def busy_seen() -> bool:
-        body = (await live.raw("a", "POST", "/me/calendar/getSchedule", json={
-            "schedules": [b], "startTime": {"dateTime": f"{day}T10:00:00", "timeZone": "UTC"},
-            "endTime": {"dateTime": f"{day}T11:00:00", "timeZone": "UTC"}, "availabilityViewInterval": 60})).json()
+        body = (
+            await live.raw(
+                "a",
+                "POST",
+                "/me/calendar/getSchedule",
+                json={
+                    "schedules": [b],
+                    "startTime": {"dateTime": f"{day}T10:00:00", "timeZone": "UTC"},
+                    "endTime": {"dateTime": f"{day}T11:00:00", "timeZone": "UTC"},
+                    "availabilityViewInterval": 60,
+                },
+            )
+        ).json()
         return "2" in (body.get("value") or [{}])[0].get("availabilityView", "")
+
     await live.poll(busy_seen, timeout=120, what="the busy block in free/busy")
     observed = {}
     for pct in (50, 0):
-        body = (await live.raw("a", "POST", "/me/findMeetingTimes", json={
-            "attendees": [{"type": "required", "emailAddress": {"address": b}}],
-            "timeConstraint": {"activityDomain": "unrestricted", "timeslots": [{
-                "start": {"dateTime": f"{day}T09:00:00", "timeZone": "UTC"},
-                "end": {"dateTime": f"{day}T13:00:00", "timeZone": "UTC"}}]},
-            "meetingDuration": "PT60M", "maxCandidates": 25, "isOrganizerOptional": True,
-            "minimumAttendeePercentage": pct})).json()
+        body = (
+            await live.raw(
+                "a",
+                "POST",
+                "/me/findMeetingTimes",
+                json={
+                    "attendees": [{"type": "required", "emailAddress": {"address": b}}],
+                    "timeConstraint": {
+                        "activityDomain": "unrestricted",
+                        "timeslots": [
+                            {
+                                "start": {"dateTime": f"{day}T09:00:00", "timeZone": "UTC"},
+                                "end": {"dateTime": f"{day}T13:00:00", "timeZone": "UTC"},
+                            }
+                        ],
+                    },
+                    "meetingDuration": "PT60M",
+                    "maxCandidates": 25,
+                    "isOrganizerOptional": True,
+                    "minimumAttendeePercentage": pct,
+                },
+            )
+        ).json()
         starts = [s["meetingTimeSlot"]["start"]["dateTime"][11:16] for s in body.get("meetingTimeSuggestions", [])]
         observed[f"minimumAttendeePercentage={pct}"] = {
-            "offered while busy (10:00 or 11:00)": any(t in ("10:00", "11:00") for t in starts), "offered": starts}
+            "offered while busy (10:00 or 11:00)": any(t in ("10:00", "11:00") for t in starts),
+            "offered": starts,
+        }
     live.finding("find_meeting_times_partial", observed)
 
 
@@ -394,10 +529,18 @@ async def test_copy_onto_a_name_that_exists(live):
     assert sub.status_code == 201, live.error_of(sub)
     drive, target = here["parentReference"]["driveId"], sub.json()["id"]
     observed = {}
-    for label, extra in (("same name", {}), ("same name again", {}), ("new name given twice", {"name": "renamed.txt"}),
-                         ("new name given twice, again", {"name": "renamed.txt"})):
-        resp = await live.raw("a", "POST", f"/me/drive/items/{item['id']}/copy",
-                              json={"parentReference": {"driveId": drive, "id": target}, **extra})
+    for label, extra in (
+        ("same name", {}),
+        ("same name again", {}),
+        ("new name given twice", {"name": "renamed.txt"}),
+        ("new name given twice, again", {"name": "renamed.txt"}),
+    ):
+        resp = await live.raw(
+            "a",
+            "POST",
+            f"/me/drive/items/{item['id']}/copy",
+            json={"parentReference": {"driveId": drive, "id": target}, **extra},
+        )
         entry: dict[str, object] = {"answer": resp.status_code}
         monitor = resp.headers.get("Location")
         for _ in range(15):

@@ -1,10 +1,8 @@
 import re
 
-import httpx
-import pytest
+from helpers import inner
 
 from m365_mcp.identity import current_person
-from helpers import inner
 
 JOIN = "https://teams.test/l/meetup-join/abc"
 ME = {"emailAddress": {"name": "Me", "address": "me@x.test"}}
@@ -13,8 +11,14 @@ TRN = {"id": "t1", "createdDateTime": "2026-10-23T12:00:00Z"}
 
 
 def event(**kw):
-    e = {"id": "e1", "subject": "Planning <review>", "isOnlineMeeting": True, "isOrganizer": True, "organizer": ME,
-         "onlineMeeting": {"joinUrl": JOIN}}
+    e = {
+        "id": "e1",
+        "subject": "Planning <review>",
+        "isOnlineMeeting": True,
+        "isOrganizer": True,
+        "organizer": ME,
+        "onlineMeeting": {"joinUrl": JOIN},
+    }
     e.update(kw)
     return e
 
@@ -37,19 +41,28 @@ async def test_recording_and_transcript_come_back_as_signed_download_commands(gr
     r = await invoke("get_event", id="e1", include_recording=True)
     assert not r.error, r.text
     assert graph.calls("GET", "/me/onlineMeetings")[0].params["$filter"] == f"JoinWebUrl eq '{JOIN}'"
-    rec, = r.data["recordings"]
+    (rec,) = r.data["recordings"]
     # The commands are in the structured result the agent reads, as in the text:
     # Claude Code shows the structured copy, where round 3 had left a placeholder.
     rec_cmd = rec["download"]
     trn_cmd = r.data["transcripts"][0]["download"]
     assert rec_cmd.startswith("curl ") and trn_cmd.startswith("curl ") and "text result" not in r.text
-    assert rec["minutes"] == 90 and rec["started"] and rec_cmd.startswith("curl -sS --fail-with-body -o 'Planning _review_.mp4'")
+    assert (
+        rec["minutes"] == 90
+        and rec["started"]
+        and rec_cmd.startswith("curl -sS --fail-with-body -o 'Planning _review_.mp4'")
+    )
     link = rt.signer.verify(link_of(rec_cmd), op="d")
     assert link.kind == "recording" and link.target == {"m": "mt1", "r": "r1", "n": "Planning _review_.mp4"}
     assert link.person == current_person().key
-    trn, = r.data["transcripts"]
+    (trn,) = r.data["transcripts"]
     tl = rt.signer.verify(link_of(trn_cmd), op="d")
-    assert tl.kind == "transcript" and tl.target == {"m": "mt1", "t": "t1", "n": "Planning _review_.vtt", "a": "text/vtt"}
+    assert tl.kind == "transcript" and tl.target == {
+        "m": "mt1",
+        "t": "t1",
+        "n": "Planning _review_.vtt",
+        "a": "text/vtt",
+    }
     assert r.data["recording_available"] is True and "400 MB per hour" in r.data["recording_note"]
     assert r.data["online_meeting"] == JOIN and inner(r.data["subject"]) == "Planning <review>"
     assert len(graph.calls("GET", "/me/events/e1")) == 1  # one read serves the event and the meeting
@@ -65,7 +78,9 @@ async def test_without_include_recording_the_meeting_is_not_looked_up(graph, inv
 
 async def test_recording_and_transcript_text_together(graph, invoke):
     routes(graph)
-    graph.on("GET", "/me/onlineMeetings/mt1/transcripts/t1/content", b"WEBVTT\n\n00:00.000 --> 00:01.000\n<v Anna>Hi</v>\n")
+    graph.on(
+        "GET", "/me/onlineMeetings/mt1/transcripts/t1/content", b"WEBVTT\n\n00:00.000 --> 00:01.000\n<v Anna>Hi</v>\n"
+    )
     r = await invoke("get_event", id="e1", include_recording=True, include_transcript=True)
     assert not r.error, r.text
     assert r.data["recordings"] and r.data["transcripts"] and "Anna: Hi" in r.data["transcript"]
@@ -94,7 +109,9 @@ async def test_only_a_transcript_is_still_available(graph, invoke):
 
 async def test_a_participant_without_download_rights_is_told_and_given_the_meeting_link(graph, invoke):
     routes(graph, ev=event(isOrganizer=False))
-    graph.on("GET", "/me/onlineMeetings/mt1/recordings", {"error": {"code": "Forbidden", "message": "denied"}}, status=403)
+    graph.on(
+        "GET", "/me/onlineMeetings/mt1/recordings", {"error": {"code": "Forbidden", "message": "denied"}}, status=403
+    )
     r = await invoke("get_event", id="e1", include_recording=True)
     assert not r.error, r.text
     assert "only by the meeting's organiser" in r.data["recording_note"] and r.data["online_meeting"] == JOIN
@@ -116,8 +133,12 @@ async def test_an_expired_recording_says_it_expired(graph, invoke):
 
 async def test_a_missing_permission_is_named(graph, invoke):
     routes(graph)
-    graph.on("GET", "/me/onlineMeetings/mt1/recordings", {"error": {
-        "code": "Forbidden", "message": "Missing scope OnlineMeetingRecording.Read.All"}}, status=403)
+    graph.on(
+        "GET",
+        "/me/onlineMeetings/mt1/recordings",
+        {"error": {"code": "Forbidden", "message": "Missing scope OnlineMeetingRecording.Read.All"}},
+        status=403,
+    )
     r = await invoke("get_event", id="e1", include_recording=True)
     assert r.error and "OnlineMeetingRecording.Read.All" in r.text and "administrator" in r.text
 
@@ -130,18 +151,33 @@ async def test_a_meeting_teams_does_not_know_is_reported(graph, invoke):
 
 async def test_transcripts_turned_off_by_policy_do_not_hide_the_recording(graph, invoke):
     routes(graph)
-    graph.on("GET", "/me/onlineMeetings/mt1/transcripts",
-             {"error": {"code": "GraphAccessToTranscriptsDisabled", "message": "x"}}, status=403)
+    graph.on(
+        "GET",
+        "/me/onlineMeetings/mt1/transcripts",
+        {"error": {"code": "GraphAccessToTranscriptsDisabled", "message": "x"}},
+        status=403,
+    )
     r = await invoke("get_event", id="e1", include_recording=True)
-    assert not r.error and r.data["recordings"] and "turned off access to meeting transcripts" in r.data["recording_note"]
+    assert (
+        not r.error and r.data["recordings"] and "turned off access to meeting transcripts" in r.data["recording_note"]
+    )
 
 
 async def test_transcripts_turned_off_as_the_live_tenant_says_it_do_not_hide_the_recording(graph, invoke):
     # The shape a Business Basic tenant returned on 2026-10-23: the reason is in innerError, not code.
     routes(graph)
-    graph.on("GET", "/me/onlineMeetings/mt1/transcripts",
-             {"error": {"code": "Forbidden", "message": "Graph API access to transcripts is disabled for this tenant.",
-                        "innerError": {"code": "GraphAccessToTranscriptsDisabled"}}}, status=403)
+    graph.on(
+        "GET",
+        "/me/onlineMeetings/mt1/transcripts",
+        {
+            "error": {
+                "code": "Forbidden",
+                "message": "Graph API access to transcripts is disabled for this tenant.",
+                "innerError": {"code": "GraphAccessToTranscriptsDisabled"},
+            }
+        },
+        status=403,
+    )
     r = await invoke("get_event", id="e1", include_recording=True)
     assert not r.error and r.data["recordings"]
     assert "turned off access to meeting transcripts" in r.data["recording_note"]
@@ -177,7 +213,11 @@ async def test_a_refused_transcript_read_says_it_is_the_transcript(graph, invoke
 
 async def test_any_transcript_refusal_beside_a_recording_says_the_recording_is_fine(graph, invoke):
     routes(graph)
-    graph.on("GET", "/me/onlineMeetings/mt1/transcripts",
-             {"error": {"code": "GraphAccessToTranscriptsDisabled", "message": "x"}}, status=403)
+    graph.on(
+        "GET",
+        "/me/onlineMeetings/mt1/transcripts",
+        {"error": {"code": "GraphAccessToTranscriptsDisabled", "message": "x"}},
+        status=403,
+    )
     r = await invoke("get_event", id="e1", include_recording=True)
     assert "The recording is not affected." in r.data["recording_note"]

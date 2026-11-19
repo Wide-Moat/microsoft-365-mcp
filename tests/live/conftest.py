@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from livekit import Live, load_tokens, token_problem
 
 HERE = Path(__file__).parent
@@ -33,8 +32,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             continue
         item.add_marker(pytest.mark.live)
         if problem:
-            item.add_marker(pytest.mark.skip(
-                reason=f"live tenant not available: {problem} ({path}); run scripts/live_login.py [--refresh]"))
+            item.add_marker(
+                pytest.mark.skip(
+                    reason=f"live tenant not available: {problem} ({path}); run scripts/live_login.py [--refresh]"
+                )
+            )
 
 
 @pytest.fixture(scope="session")

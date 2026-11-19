@@ -33,8 +33,18 @@ AREAS: dict[str, bool] = {
 ALWAYS_ON = frozenset({"account"})
 
 ALLOWED_VERBS = (
-    "list_", "get_", "save_", "delete_", "send_", "cancel_", "respond_", "share_", "update_",
-    "download_", "upload_", "find_",
+    "list_",
+    "get_",
+    "save_",
+    "delete_",
+    "send_",
+    "cancel_",
+    "respond_",
+    "share_",
+    "update_",
+    "download_",
+    "upload_",
+    "find_",
 )
 
 
@@ -84,9 +94,19 @@ def tool(
             raise ValueError(f"tool {name!r} declared twice")
         doc = (fn.__doc__ or "").strip()
         _TOOLS[name] = ToolSpec(
-            fn=fn, name=name, title=title, area=area, scopes=tuple(scopes), read_only=read_only,
-            notifies_others=notifies_others, irreversible=irreversible, idempotent=idempotent,
-            returns_list=returns_list, switch=switch, description=" ".join(doc.split()), gates=dict(gates or {}),
+            fn=fn,
+            name=name,
+            title=title,
+            area=area,
+            scopes=tuple(scopes),
+            read_only=read_only,
+            notifies_others=notifies_others,
+            irreversible=irreversible,
+            idempotent=idempotent,
+            returns_list=returns_list,
+            switch=switch,
+            description=" ".join(doc.split()),
+            gates=dict(gates or {}),
         )
         return fn
 
@@ -102,7 +122,4 @@ def all_tools() -> dict[str, ToolSpec]:
 
 def enabled(areas: frozenset[str], switches: frozenset[str] = frozenset()) -> list[ToolSpec]:
     on = set(areas) | ALWAYS_ON
-    return [
-        s for s in all_tools().values()
-        if s.area in on and (s.switch is None or s.switch in switches)
-    ]
+    return [s for s in all_tools().values() if s.area in on and (s.switch is None or s.switch in switches)]

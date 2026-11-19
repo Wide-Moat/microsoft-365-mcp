@@ -2,8 +2,8 @@ import asyncio
 
 import httpx
 import pytest
-
 from helpers import FakeGraph
+
 from m365_mcp.graph.client import Graph, Pacer
 from m365_mcp.graph.errors import GraphError, to_person_error
 
@@ -12,8 +12,15 @@ def client(fake, sleeps=None, pacer=None):
     async def sleep(s):
         if sleeps is not None:
             sleeps.append(s)
-    return Graph("tok", "p1", timezone="W. Europe Standard Time", transport=httpx.MockTransport(fake), sleep=sleep,
-                 pacer=pacer or Pacer())
+
+    return Graph(
+        "tok",
+        "p1",
+        timezone="W. Europe Standard Time",
+        transport=httpx.MockTransport(fake),
+        sleep=sleep,
+        pacer=pacer or Pacer(),
+    )
 
 
 async def test_headers_on_every_request():
@@ -35,6 +42,7 @@ async def test_429_waits_retry_after_then_succeeds():
         if calls["n"] == 1:
             return httpx.Response(429, headers={"Retry-After": "2"}, json={"error": {"code": "TooManyRequests"}})
         return httpx.Response(200, json={"ok": True})
+
     fake.on("GET", "/me", flaky)
     sleeps = []
     async with client(fake, sleeps) as g:
@@ -77,14 +85,24 @@ async def test_get_is_retried_once_on_502():
     def once(seen):
         n["c"] += 1
         return httpx.Response(502) if n["c"] == 1 else httpx.Response(200, json={})
+
     fake.on("GET", "/me", once)
     async with client(fake, []) as g:
         await g.get("/me")
     assert n["c"] == 2
 
 
-@pytest.mark.parametrize("path", ["/me/messages/abc", "/me/events/e1/attachments/a1", "/me/calendars/c1",
-                                  "/me/mailFolders/f1", "/users/x/messages/1", "/users/x/events/e1"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/me/messages/abc",
+        "/me/events/e1/attachments/a1",
+        "/me/calendars/c1",
+        "/me/mailFolders/f1",
+        "/users/x/messages/1",
+        "/users/x/events/e1",
+    ],
+)
 async def test_delete_outside_the_allowlist_never_reaches_graph(path):
     fake = FakeGraph()
     async with client(fake) as g:
@@ -104,8 +122,12 @@ async def test_only_graph_urls_are_called(url):
 
 async def test_error_body_text_never_reaches_the_exception():
     fake = FakeGraph()
-    fake.on("GET", "/me/messages/1", {"error": {"code": "ErrorAccessDenied",
-                                               "message": "Access denied for anna@contoso.test subject 'Salary'"}}, status=403)
+    fake.on(
+        "GET",
+        "/me/messages/1",
+        {"error": {"code": "ErrorAccessDenied", "message": "Access denied for anna@contoso.test subject 'Salary'"}},
+        status=403,
+    )
     async with client(fake) as g:
         with pytest.raises(GraphError) as e:
             await g.get("/me/messages/1")
@@ -124,7 +146,6 @@ async def test_missing_scope_named_in_a_403_is_reported():
 
 async def test_outlook_concurrency_is_four_per_person():
     pacer = Pacer()
-    fake = FakeGraph()
     live = {"now": 0, "max": 0}
     gate = asyncio.Event()
 
@@ -156,6 +177,7 @@ async def test_teams_requests_are_spaced_a_second_apart():
     async def sleep(s):
         sleeps.append(s)
         clock["t"] += s
+
     for _ in range(3):
         await pacer.space("p1", "teams", sleep=sleep, clock=lambda: clock["t"])
     assert sleeps == [1.0, 1.0]
@@ -163,8 +185,13 @@ async def test_teams_requests_are_spaced_a_second_apart():
 
 async def test_stream_follows_the_redirect_without_the_bearer():
     fake = FakeGraph()
-    fake.on("GET", "/me/drive/items/i1/content", None, status=302,
-            headers={"Location": "https://contoso-my.sharepoint.com/dl?sig=abc"})
+    fake.on(
+        "GET",
+        "/me/drive/items/i1/content",
+        None,
+        status=302,
+        headers={"Location": "https://contoso-my.sharepoint.com/dl?sig=abc"},
+    )
     fake.on("GET", "https://contoso-my.sharepoint.com/dl", b"hello")
     async with client(fake) as g:
         async with g.stream("/me/drive/items/i1/content") as resp:
@@ -180,8 +207,9 @@ async def test_a_get_with_no_body_is_an_empty_object():
         assert await g.get("/me/mailboxSettings/timeZone") == {}
 
 
-@pytest.mark.parametrize("location", ["https://evil.test/dl?sig=abc", "https://sharepoint.com.evil.test/dl",
-                                      "https://evilsharepoint.com/dl"])
+@pytest.mark.parametrize(
+    "location", ["https://evil.test/dl?sig=abc", "https://sharepoint.com.evil.test/dl", "https://evilsharepoint.com/dl"]
+)
 async def test_a_download_redirect_outside_microsofts_file_hosts_is_not_followed(location):
     fake = FakeGraph()
     fake.on("GET", "/me/drive/items/i1/content", None, status=302, headers={"Location": location})
@@ -199,19 +227,26 @@ async def test_an_upload_url_outside_microsofts_hosts_is_refused():
 
     async def chunks():
         yield b"abc"
+
     async with client(fake) as g:
         with pytest.raises(ValueError):
             await g.upload_session("https://evil.test/up", chunks(), 3)
     assert fake.seen == []
 
 
-@pytest.mark.parametrize("url", ["https://contoso-my.sharepoint.com/personal/x/_api/v2.0/uploadSession?guid=1",
-                                 "https://outlook.office.com/api/v2.0/Users('a')/Messages('b')/AttachmentSessions('c')"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://contoso-my.sharepoint.com/personal/x/_api/v2.0/uploadSession?guid=1",
+        "https://outlook.office.com/api/v2.0/Users('a')/Messages('b')/AttachmentSessions('c')",
+    ],
+)
 async def test_an_upload_url_on_microsofts_hosts_is_used(url):
     fake = FakeGraph()
     fake.on("PUT", ".*", {"id": "done"}, status=201)
 
     async def chunks():
         yield b"abc"
+
     async with client(fake) as g:
         assert await g.upload_session(url, chunks(), 3) == {"id": "done"}

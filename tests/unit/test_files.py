@@ -11,10 +11,18 @@ DELETE_OK = re.compile(r"^/(me/drive|drives/[^/]+)/items/[^/]+(/permissions/[^/]
 
 
 def drive_item(i, name, *, folder=False, drive=OWN, path="/drive/root:/Reports", size=1234, **kw):
-    m = {"id": i, "name": name, "size": size, "webUrl": f"https://x.test/{name}",
-         "lastModifiedDateTime": "2026-10-20T10:00:00Z",
-         "lastModifiedBy": {"user": {"displayName": "Bo"}},
-         "parentReference": {"driveId": drive, "path": path}, "@odata.etag": "W/1", "eTag": "abc", **kw}
+    m = {
+        "id": i,
+        "name": name,
+        "size": size,
+        "webUrl": f"https://x.test/{name}",
+        "lastModifiedDateTime": "2026-10-20T10:00:00Z",
+        "lastModifiedBy": {"user": {"displayName": "Bo"}},
+        "parentReference": {"driveId": drive, "path": path},
+        "@odata.etag": "W/1",
+        "eTag": "abc",
+        **kw,
+    }
     m["folder" if folder else "file"] = {"childCount": 3} if folder else {"mimeType": "application/octet-stream"}
     return m
 
@@ -23,10 +31,20 @@ def person(graph, name, addr, group=False):
     def handler(seen):
         q = seen.params.get("$search", "").strip('"').lower()
         if q and (q in name.lower() or q in addr.lower()):
-            return httpx.Response(200, json={"value": [{
-                "displayName": name, "scoredEmailAddresses": [{"address": addr}],
-                "personType": {"class": "Group" if group else "Person", "subclass": "OrganizationUser"}}]})
+            return httpx.Response(
+                200,
+                json={
+                    "value": [
+                        {
+                            "displayName": name,
+                            "scoredEmailAddresses": [{"address": addr}],
+                            "personType": {"class": "Group" if group else "Person", "subclass": "OrganizationUser"},
+                        }
+                    ]
+                },
+            )
         return httpx.Response(200, json={"value": []})
+
     graph.on("GET", "/me/people", handler)
 
 
@@ -49,10 +67,20 @@ def assert_deletes_stay_in_the_allowlist(graph):
 
 # -- list_files ------------------------------------------------------------------------------
 
+
 async def test_list_files_my_projects_items(graph, invoke):
-    graph.on("GET", "/me/drive/root/children", {"value": [
-        drive_item("f1", "Q3 plan.docx"), drive_item("d1", "Archive", folder=True),
-        drive_item("f2", "chart.png"), drive_item("f3", "report.pdf")]})
+    graph.on(
+        "GET",
+        "/me/drive/root/children",
+        {
+            "value": [
+                drive_item("f1", "Q3 plan.docx"),
+                drive_item("d1", "Archive", folder=True),
+                drive_item("f2", "chart.png"),
+                drive_item("f3", "report.pdf"),
+            ]
+        },
+    )
     r = await invoke("list_files")
     assert not r.error, r.text
     names = {i["name"]: i for i in r.data["items"]}
@@ -75,12 +103,17 @@ async def test_list_files_in_a_folder_uses_path_addressing(graph, invoke):
 async def test_query_without_folder_searches_everything_and_pages_by_from(graph, invoke):
     graph.on("GET", "/me/drive", {"id": OWN})
     hit = lambda i: {"resource": drive_item(i, f"{i}.docx", drive=SITE_DRIVE)}  # noqa: E731
-    graph.on("POST", "/search/query", {"value": [{"hitsContainers": [{
-        "hits": [hit("a"), hit("b")], "moreResultsAvailable": True}]}]})
+    graph.on(
+        "POST",
+        "/search/query",
+        {"value": [{"hitsContainers": [{"hits": [hit("a"), hit("b")], "moreResultsAvailable": True}]}]},
+    )
     r = await invoke("list_files", query="budget", limit=2)
     assert not r.error, r.text
     body = graph.calls("POST", "/search/query")[0].json
-    assert body == {"requests": [{"entityTypes": ["driveItem"], "query": {"queryString": "budget"}, "from": 0, "size": 2}]}
+    assert body == {
+        "requests": [{"entityTypes": ["driveItem"], "query": {"queryString": "budget"}, "from": 0, "size": 2}]
+    }
     assert r.data["items"][0]["drive"] == SITE_DRIVE and r.data["has_more"]
     await invoke("list_files", query="budget", limit=2, cursor=r.data["cursor"])
     assert graph.calls("POST", "/search/query")[1].json["requests"][0]["from"] == 2
@@ -88,9 +121,24 @@ async def test_query_without_folder_searches_everything_and_pages_by_from(graph,
 
 async def test_shared_goes_through_search_never_the_deprecated_endpoint(graph, invoke):
     graph.on("GET", "/me/drive", {"id": OWN})
-    graph.on("POST", "/search/query", {"value": [{"hitsContainers": [{"hits": [
-        {"resource": drive_item("mine", "mine.docx")},
-        {"resource": drive_item("theirs", "theirs.docx", drive="b!other")}]}]}]})
+    graph.on(
+        "POST",
+        "/search/query",
+        {
+            "value": [
+                {
+                    "hitsContainers": [
+                        {
+                            "hits": [
+                                {"resource": drive_item("mine", "mine.docx")},
+                                {"resource": drive_item("theirs", "theirs.docx", drive="b!other")},
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+    )
     r = await invoke("list_files", location="shared")
     assert not r.error, r.text
     assert [i["name"] for i in r.data["items"]] == ["theirs.docx"]
@@ -106,9 +154,13 @@ async def test_a_recent_query_keeps_filtering_on_the_next_page(graph, invoke):
 
     def recent(seen):
         if seen.params.get("$skiptoken") == "p2":
-            return httpx.Response(200, json={"value": [drive_item("c", "budget 2.xlsx"), drive_item("d", "other.docx")]})
-        return httpx.Response(200, json={"value": [drive_item("a", "budget.xlsx"), drive_item("b", "notes.txt")],
-                                         "@odata.nextLink": nxt})
+            return httpx.Response(
+                200, json={"value": [drive_item("c", "budget 2.xlsx"), drive_item("d", "other.docx")]}
+            )
+        return httpx.Response(
+            200, json={"value": [drive_item("a", "budget.xlsx"), drive_item("b", "notes.txt")], "@odata.nextLink": nxt}
+        )
+
     graph.on("GET", "/me/drive/recent", recent)
     r = await invoke("list_files", location="recent", query="budget")
     assert [i["name"] for i in r.data["items"]] == ["budget.xlsx"] and r.data["has_more"]
@@ -148,22 +200,41 @@ async def test_site_location_without_a_site_is_refused(graph, invoke):
 
 async def test_two_sites_with_one_name_are_ambiguous(graph, invoke):
     graph.on("GET", "/me/drive", {"id": OWN})
-    graph.on("GET", "/sites", {"value": [
-        {"id": "S1", "displayName": "Sales", "webUrl": "https://x.test/sites/s1"},
-        {"id": "S2", "displayName": "Sales", "webUrl": "https://x.test/sites/s2"}]})
+    graph.on(
+        "GET",
+        "/sites",
+        {
+            "value": [
+                {"id": "S1", "displayName": "Sales", "webUrl": "https://x.test/sites/s1"},
+                {"id": "S2", "displayName": "Sales", "webUrl": "https://x.test/sites/s2"},
+            ]
+        },
+    )
     r = await invoke("list_files", location="site", site="Sales")
     assert r.error and "https://x.test/sites/s1" in r.text and "https://x.test/sites/s2" in r.text
 
 
 # -- list_files(kind=site) ------------------------------------------------------------------------------
 
+
 async def test_kind_site_shows_libraries_and_visible_lists_only(graph, invoke):
-    graph.on("GET", "/me/followedSites", {"value": [{"id": "S1", "displayName": "Ops", "webUrl": "https://x.test/sites/ops"}]})
+    graph.on(
+        "GET",
+        "/me/followedSites",
+        {"value": [{"id": "S1", "displayName": "Ops", "webUrl": "https://x.test/sites/ops"}]},
+    )
     graph.on("GET", "/sites/S1/drives", {"value": [{"id": "d1", "name": "Documents"}]})
-    graph.on("GET", "/sites/S1/lists", {"value": [
-        {"id": "l1", "displayName": "Requests", "list": {"template": "genericList", "hidden": False}},
-        {"id": "l2", "displayName": "appdata", "list": {"template": "genericList", "hidden": True}},
-        {"id": "l3", "displayName": "Documents", "list": {"template": "documentLibrary"}}]})
+    graph.on(
+        "GET",
+        "/sites/S1/lists",
+        {
+            "value": [
+                {"id": "l1", "displayName": "Requests", "list": {"template": "genericList", "hidden": False}},
+                {"id": "l2", "displayName": "appdata", "list": {"template": "genericList", "hidden": True}},
+                {"id": "l3", "displayName": "Documents", "list": {"template": "documentLibrary"}},
+            ]
+        },
+    )
     r = await invoke("list_files", kind="site", include_lists=True)
     assert not r.error, r.text
     s = r.data["items"][0]
@@ -182,6 +253,7 @@ async def test_kind_site_searches_sites_by_name(graph, invoke):
 
 async def test_a_file_cursor_is_not_a_site_cursor(graph, invoke, rt):
     from m365_mcp.identity import current_person
+
     cur = rt.cursors.make("list_files", current_person().key, {"from": 10, "q": "budget", "loc": "my"})
     r = await invoke("list_files", kind="site", cursor=cur)
     assert r.error and "cursor" in r.text and quiet(graph) == []
@@ -194,16 +266,52 @@ async def test_include_lists_is_for_sites_only(graph, invoke):
 
 # -- get_file --------------------------------------------------------------------------------
 
+
 async def test_get_file_permissions_never_show_links(graph, invoke):
     graph.on("GET", "/me/drive/items/f1", drive_item("f1", "plan.docx", createdBy={"user": {"displayName": "Ann"}}))
-    graph.on("GET", "/me/drive/items/f1/permissions", {"value": [
-        {"id": "p1", "roles": ["owner"], "grantedToV2": {"user": {"displayName": "Ann", "email": "ann@x.test"}}},
-        {"id": "p2", "roles": ["read"], "link": {"type": "view", "scope": "organization",
-                                                  "webUrl": "https://x.test/SECRETLINK", "token": "TOK"}},
-        {"id": "p3", "roles": ["write"], "inheritedFrom": {"id": "parent"},
-         "grantedToV2": {"user": {"displayName": "Bo", "email": "bo@x.test"}}}]})
-    graph.on("GET", "/me/drive/items/f1/versions", {"value": [
-        {"id": "3.0", "lastModifiedDateTime": "2026-10-20T10:00:00Z", "lastModifiedBy": {"user": {"displayName": "Bo"}}, "size": 9}]})
+    graph.on(
+        "GET",
+        "/me/drive/items/f1/permissions",
+        {
+            "value": [
+                {
+                    "id": "p1",
+                    "roles": ["owner"],
+                    "grantedToV2": {"user": {"displayName": "Ann", "email": "ann@x.test"}},
+                },
+                {
+                    "id": "p2",
+                    "roles": ["read"],
+                    "link": {
+                        "type": "view",
+                        "scope": "organization",
+                        "webUrl": "https://x.test/SECRETLINK",
+                        "token": "TOK",
+                    },
+                },
+                {
+                    "id": "p3",
+                    "roles": ["write"],
+                    "inheritedFrom": {"id": "parent"},
+                    "grantedToV2": {"user": {"displayName": "Bo", "email": "bo@x.test"}},
+                },
+            ]
+        },
+    )
+    graph.on(
+        "GET",
+        "/me/drive/items/f1/versions",
+        {
+            "value": [
+                {
+                    "id": "3.0",
+                    "lastModifiedDateTime": "2026-10-20T10:00:00Z",
+                    "lastModifiedBy": {"user": {"displayName": "Bo"}},
+                    "size": 9,
+                }
+            ]
+        },
+    )
     r = await invoke("get_file", id="f1", include_permissions=True, include_versions=True)
     assert not r.error, r.text
     assert "SECRETLINK" not in r.text and "TOK" not in r.text
@@ -226,11 +334,14 @@ async def test_get_file_needs_an_id_or_a_path(graph, invoke):
 
 # -- download_file ---------------------------------------------------------------------------
 
+
 async def test_download_issues_a_quoted_curl_with_a_drive_link(graph, invoke, rt):
     graph.on("GET", "/me/drive/items/f1", drive_item("f1", "it's $(rm -rf x) q3.docx"))
     r = await invoke("download_file", id="f1")
     assert not r.error, r.text
-    cmd = re.search(r"curl -sS --fail-with-body -o '[^\n]*?' 'https://links", r.text).group(0)  # the text holds the one copy
+    cmd = re.search(r"curl -sS --fail-with-body -o '[^\n]*?' 'https://links", r.text).group(
+        0
+    )  # the text holds the one copy
     assert "$(" not in cmd.split("'")[1] and "'" not in cmd.split("'")[1]
     link = rt.signer.verify(link_of(r.text, "d"), op="d")
     assert link.kind == "drive" and link.target == {"i": "f1", "n": "it's $(rm -rf x) q3.docx"}
@@ -267,6 +378,7 @@ async def test_download_without_link_keys_says_so(graph, invoke, rt):
 
 # -- upload_file -----------------------------------------------------------------------------
 
+
 async def test_upload_resolves_the_folder_and_returns_a_link(graph, invoke, rt):
     graph.on("GET", "/me/drive/root:/Reports/2026", {"id": "P1", "name": "2026", "folder": {}})
     r = await invoke("upload_file", folder="Reports/2026", name="q3.xlsx", on_conflict="replace")
@@ -281,7 +393,12 @@ async def test_upload_to_the_top_level_of_a_site_library(graph, invoke, rt):
     graph.on("GET", "/drives/b!site/root", {"id": "R1", "folder": {}})
     r = await invoke("upload_file", folder="", name="a.txt", drive="b!site")
     assert not r.error, r.text
-    assert rt.signer.verify(link_of(r.text, "u"), op="u").target == {"p": "R1", "n": "a.txt", "c": "fail", "d": "b!site"}
+    assert rt.signer.verify(link_of(r.text, "u"), op="u").target == {
+        "p": "R1",
+        "n": "a.txt",
+        "c": "fail",
+        "d": "b!site",
+    }
 
 
 @pytest.mark.parametrize("name", ["", "a/b.txt", "a:b.txt", "q?.txt", "...", "x" * 300])
@@ -298,6 +415,7 @@ async def test_upload_to_a_file_path_is_refused(graph, invoke):
 
 # -- update_file -----------------------------------------------------------------------------
 
+
 async def test_move_patches_the_parent_reference(graph, invoke):
     graph.on("GET", "/me/drive/root:/Archive", {"id": "A1", "name": "Archive", "folder": {}})
     graph.on("PATCH", "/me/drive/items/f[12]", {"id": "x"})
@@ -305,7 +423,8 @@ async def test_move_patches_the_parent_reference(graph, invoke):
     assert not r.error, r.text
     assert [(s.path, s.json) for s in graph.writes()] == [
         ("/me/drive/items/f1", {"parentReference": {"id": "A1"}}),
-        ("/me/drive/items/f2", {"parentReference": {"id": "A1"}})]
+        ("/me/drive/items/f2", {"parentReference": {"id": "A1"}}),
+    ]
 
 
 async def test_rename_patches_the_name_and_needs_one_item(graph, invoke):
@@ -327,8 +446,13 @@ async def test_create_folder_posts_the_folder_and_fails_on_a_conflict(graph, inv
 async def test_copy_waits_on_a_graph_monitor_url(graph, invoke):
     graph.on("GET", "/me/drive", {"id": OWN})
     graph.on("GET", "/me/drive/root:/Backup", {"id": "B1", "name": "Backup", "folder": {}})
-    graph.on("POST", "/me/drive/items/f1/copy", None, status=202,
-             headers={"Location": "https://graph.microsoft.com/v1.0/monitor/m1"})
+    graph.on(
+        "POST",
+        "/me/drive/items/f1/copy",
+        None,
+        status=202,
+        headers={"Location": "https://graph.microsoft.com/v1.0/monitor/m1"},
+    )
     polls = iter([{"status": "inProgress"}, {"status": "completed", "resourceId": "n1"}])
     graph.on("GET", "/monitor/m1", lambda s: httpx.Response(200, json=next(polls)))
     r = await invoke("update_file", action="copy", ids=["f1"], target_folder="Backup")
@@ -342,8 +466,13 @@ def _copies(graph, outcomes):
     graph.on("GET", "/me/drive", {"id": OWN})
     graph.on("GET", "/me/drive/root:/Backup", {"id": "B1", "name": "Backup", "folder": {}})
     for i, outcome in outcomes.items():
-        graph.on("POST", f"/me/drive/items/{i}/copy", None, status=202,
-                 headers={"Location": f"https://graph.microsoft.com/v1.0/monitor/{i}"})
+        graph.on(
+            "POST",
+            f"/me/drive/items/{i}/copy",
+            None,
+            status=202,
+            headers={"Location": f"https://graph.microsoft.com/v1.0/monitor/{i}"},
+        )
         graph.on("GET", f"/monitor/{i}", outcome)
 
 
@@ -372,8 +501,16 @@ async def test_a_folder_into_its_own_subfolder_is_refused_with_why(graph, invoke
     # Measured: Graph answers 400 invalidRequest ("Invalid request" for a move); QA read only
     # "refused the request".
     graph.on("GET", "/me/drive", {"id": OWN})
-    graph.on("GET", "/me/drive/root:/A/sub", {"id": "S1", "name": "sub", "folder": {}, "parentReference": {"path": "/drive/root:/A"}})
-    graph.on("GET", "/me/drive/items/A1", {"id": "A1", "name": "A", "folder": {}, "parentReference": {"path": "/drive/root:"}})
+    graph.on(
+        "GET",
+        "/me/drive/root:/A/sub",
+        {"id": "S1", "name": "sub", "folder": {}, "parentReference": {"path": "/drive/root:/A"}},
+    )
+    graph.on(
+        "GET",
+        "/me/drive/items/A1",
+        {"id": "A1", "name": "A", "folder": {}, "parentReference": {"path": "/drive/root:"}},
+    )
     refused = {"error": {"code": "invalidRequest", "message": "Invalid request"}}
     graph.on("PATCH", "/me/drive/items/A1", refused, status=400)
     graph.on("POST", "/me/drive/items/A1/copy", refused, status=400)
@@ -384,8 +521,13 @@ async def test_a_folder_into_its_own_subfolder_is_refused_with_why(graph, invoke
 async def test_copy_polls_the_sharepoint_monitor_without_the_bearer(graph, invoke):
     graph.on("GET", "/me/drive", {"id": OWN})
     graph.on("GET", "/me/drive/root:/Backup", {"id": "B1", "name": "Backup", "folder": {}})
-    graph.on("POST", "/me/drive/items/f1/copy", None, status=202,
-             headers={"Location": "https://contoso.sharepoint.com/_api/v2.0/monitor/zzz"})
+    graph.on(
+        "POST",
+        "/me/drive/items/f1/copy",
+        None,
+        status=202,
+        headers={"Location": "https://contoso.sharepoint.com/_api/v2.0/monitor/zzz"},
+    )
     graph.on("GET", "https://contoso.sharepoint.com/_api/v2.0/monitor/zzz", {"status": "completed"})
     r = await invoke("update_file", action="copy", ids=["f1"], target_folder="Backup")
     assert not r.error and r.data["copies"] == {"f1": "completed"}
@@ -457,8 +599,13 @@ async def test_one_failure_does_not_hide_the_others(graph, invoke):
 
 # -- share_file ------------------------------------------------------------------------------
 
+
 async def test_share_link_is_organisation_scoped(graph, invoke):
-    graph.on("POST", "/me/drive/items/f1/createLink", {"link": {"type": "view", "scope": "organization", "webUrl": "https://x.test/l"}})
+    graph.on(
+        "POST",
+        "/me/drive/items/f1/createLink",
+        {"link": {"type": "view", "scope": "organization", "webUrl": "https://x.test/l"}},
+    )
     r = await invoke("share_file", id="f1", action="link", user_confirmed=True)
     assert not r.error, r.text
     assert graph.writes()[0].json == {"type": "view", "scope": "organization"}
@@ -466,7 +613,11 @@ async def test_share_link_is_organisation_scoped(graph, invoke):
 
 
 async def test_share_link_edit_still_organisation_scoped(graph, invoke):
-    graph.on("POST", "/me/drive/items/f1/createLink", {"link": {"type": "edit", "scope": "organization", "webUrl": "https://x.test/l"}})
+    graph.on(
+        "POST",
+        "/me/drive/items/f1/createLink",
+        {"link": {"type": "edit", "scope": "organization", "webUrl": "https://x.test/l"}},
+    )
     await invoke("share_file", id="f1", action="link", role="edit", user_confirmed=True)
     assert graph.writes()[0].json == {"type": "edit", "scope": "organization"}
 
@@ -482,11 +633,17 @@ async def test_share_without_confirmation_writes_nothing(graph, invoke, action):
 async def test_invite_sends_a_signed_in_invitation(graph, invoke):
     person(graph, "Bo", "bo@x.test")
     graph.on("POST", "/me/drive/items/f1/invite", {"value": []})
-    r = await invoke("share_file", id="f1", action="invite", people=["Bo"], role="edit", message="Please review",
-                     user_confirmed=True)
+    r = await invoke(
+        "share_file", id="f1", action="invite", people=["Bo"], role="edit", message="Please review", user_confirmed=True
+    )
     assert not r.error, r.text
-    assert graph.writes()[0].json == {"recipients": [{"email": "bo@x.test"}], "roles": ["write"],
-                                      "sendInvitation": True, "requireSignIn": True, "message": "Please review"}
+    assert graph.writes()[0].json == {
+        "recipients": [{"email": "bo@x.test"}],
+        "roles": ["write"],
+        "sendInvitation": True,
+        "requireSignIn": True,
+        "message": "Please review",
+    }
     assert r.data["invited"] == ["Bo <bo@x.test>"] and r.data["sends_left_now"] == 9
 
 
@@ -514,13 +671,27 @@ async def test_share_draws_from_the_shared_bucket(graph, invoke):
     assert r.error and "Wait" in r.text and len(graph.writes()) == 10
 
 
-PERMS = {"value": [
-    {"id": "own", "roles": ["owner"], "grantedToV2": {"user": {"displayName": "Ann", "email": "ann@x.test"}}},
-    {"id": "bo", "roles": ["read"], "grantedToV2": {"user": {"displayName": "Bo", "email": "bo@x.test"}}},
-    {"id": "inh", "roles": ["read"], "inheritedFrom": {"id": "p"},
-     "grantedToV2": {"user": {"displayName": "Cy", "email": "cy@x.test"}}},
-    {"id": "lnk", "roles": ["read"], "link": {"type": "view", "scope": "users"},
-     "grantedToIdentitiesV2": [{"user": {"displayName": "Di", "email": "di@x.test"}}, {"user": {"email": "ed@x.test"}}]}]}
+PERMS = {
+    "value": [
+        {"id": "own", "roles": ["owner"], "grantedToV2": {"user": {"displayName": "Ann", "email": "ann@x.test"}}},
+        {"id": "bo", "roles": ["read"], "grantedToV2": {"user": {"displayName": "Bo", "email": "bo@x.test"}}},
+        {
+            "id": "inh",
+            "roles": ["read"],
+            "inheritedFrom": {"id": "p"},
+            "grantedToV2": {"user": {"displayName": "Cy", "email": "cy@x.test"}},
+        },
+        {
+            "id": "lnk",
+            "roles": ["read"],
+            "link": {"type": "view", "scope": "users"},
+            "grantedToIdentitiesV2": [
+                {"user": {"displayName": "Di", "email": "di@x.test"}},
+                {"user": {"email": "ed@x.test"}},
+            ],
+        },
+    ]
+}
 
 
 async def test_revoke_deletes_only_the_direct_permission_of_the_named_person(graph, invoke):
@@ -561,7 +732,9 @@ async def test_revoke_needs_no_confirmation(graph, invoke):
 
 
 async def test_a_link_issued_for_a_download_cannot_upload(rt):
-    s = rt.signer.issue(op="d", kind="drive", target={"i": "x"}, person="p", token="t", token_expires=2_000_000_000, ttl=300)
+    s = rt.signer.issue(
+        op="d", kind="drive", target={"i": "x"}, person="p", token="t", token_expires=2_000_000_000, ttl=300
+    )
     with pytest.raises(LinkRefused):
         rt.signer.verify(s, op="u")
 
@@ -575,12 +748,17 @@ def team_site(graph):
     # Measured: /sites?search= and /me/followedSites both came back empty or 500 for a team's own
     # site; /me/joinedTeams then /groups/{id}/sites/root finds it.
     graph.on("GET", "/me/joinedTeams", {"value": [{"id": "G1", "displayName": "Ops team"}]})
-    graph.on("GET", "/groups/G1/sites/root", {"id": "S9", "displayName": "Ops team", "webUrl": "https://x.test/sites/ops"})
+    graph.on(
+        "GET", "/groups/G1/sites/root", {"id": "S9", "displayName": "Ops team", "webUrl": "https://x.test/sites/ops"}
+    )
     graph.on("GET", "/me/followedSites", {"value": []})
     graph.on("GET", "/sites", SEARCH_DOWN, status=500)
     graph.on("GET", "/sites/S9/drives", {"value": [{"id": "d9", "name": "Documents"}]})
-    graph.on("GET", "/sites/S9/lists", {"value": [
-        {"id": "l9", "displayName": "QA list", "list": {"template": "genericList", "hidden": False}}]})
+    graph.on(
+        "GET",
+        "/sites/S9/lists",
+        {"value": [{"id": "l9", "displayName": "QA list", "list": {"template": "genericList", "hidden": False}}]},
+    )
 
 
 async def test_the_sites_of_the_persons_teams_are_listed(graph, invoke):
@@ -613,7 +791,9 @@ async def test_a_file_search_microsoft_cannot_answer_falls_back_to_names_in_the_
     # tenant for every query.
     graph.on("GET", "/me/drive", {"id": OWN})
     graph.on("POST", "/search/query", SEARCH_DOWN, status=500)
-    graph.on("GET", "/me/drive/root/children", {"value": [drive_item("a", "Budget 2026.xlsx"), drive_item("b", "notes.txt")]})
+    graph.on(
+        "GET", "/me/drive/root/children", {"value": [drive_item("a", "Budget 2026.xlsx"), drive_item("b", "notes.txt")]}
+    )
     r = await invoke("list_files", query="budget")
     assert not r.error, r.text
     assert [i["name"] for i in r.data["items"]] == ["Budget 2026.xlsx"]
@@ -624,8 +804,11 @@ async def test_the_name_fallback_continues_by_cursor_instead_of_dropping_matches
     # Found by QA: eleven matching names, limit 2: two came back with has_more false and no cursor.
     graph.on("GET", "/me/drive", {"id": OWN})
     graph.on("GET", "/me/drive/root:/Reports:/search\\(q='n'\\)", SEARCH_DOWN, status=500)
-    graph.on("GET", "/me/drive/root:/Reports:/children", {"value": [drive_item(f"f{i}", f"n{i}.txt") for i in range(5)]
-                                                          + [drive_item("x", "other.txt")]})
+    graph.on(
+        "GET",
+        "/me/drive/root:/Reports:/children",
+        {"value": [drive_item(f"f{i}", f"n{i}.txt") for i in range(5)] + [drive_item("x", "other.txt")]},
+    )
     r = await invoke("list_files", folder="Reports", query="n", limit=2)
     assert not r.error, r.text
     seen = [i["name"] for i in r.data["items"]]
@@ -642,7 +825,9 @@ async def test_a_folder_that_is_a_file_is_said_to_be_a_file(graph, invoke):
     # Measured: children of a file answer 422 notSupported, and its search(q=) 500; QA saw a bare
     # "refused the request" for both.
     graph.on("GET", "/me/drive", {"id": OWN})
-    not_a_folder = {"error": {"code": "notSupported", "message": "Children cannot be listed from an item that is not a folder"}}
+    not_a_folder = {
+        "error": {"code": "notSupported", "message": "Children cannot be listed from an item that is not a folder"}
+    }
     graph.on("GET", "/me/drive/root:/a.txt:/children", not_a_folder, status=422)
     graph.on("GET", "/me/drive/root:/a.txt:/search\\(q='x'\\)", SEARCH_DOWN, status=500)
     for args in ({"folder": "a.txt"}, {"folder": "a.txt", "query": "x"}):
@@ -748,8 +933,17 @@ async def test_site_search_pages_skip_nothing_after_the_known_sites(graph, invok
     graph.on("GET", "/me/joinedTeams", {"value": [{"id": "G1"}]})
     graph.on("GET", "/groups/G1/sites/root", {"id": "S1", "displayName": "Ops one"})
     graph.on("GET", "/me/followedSites", {"value": []})
-    graph.on("GET", "/sites", {"value": [{"id": "S1", "displayName": "Ops one"}, {"id": "S2", "displayName": "Ops two"},
-                                         {"id": "S3", "displayName": "Ops three"}]})
+    graph.on(
+        "GET",
+        "/sites",
+        {
+            "value": [
+                {"id": "S1", "displayName": "Ops one"},
+                {"id": "S2", "displayName": "Ops two"},
+                {"id": "S3", "displayName": "Ops three"},
+            ]
+        },
+    )
     graph.on("GET", "/sites/S[0-9]/drives", {"value": []})
     first = await invoke("list_files", kind="site", query="ops", limit=2)
     assert [s["id"] for s in first.data["items"]] == ["S1"] and first.data["has_more"] is True
@@ -769,9 +963,16 @@ async def test_a_site_name_while_search_is_down_is_not_called_missing(graph, inv
 async def test_a_continued_listing_returns_the_whole_page_whatever_the_limit(graph, invoke):
     nxt = "https://graph.microsoft.com/v1.0/me/drive/root/children?$skiptoken=2"
     graph.on("GET", "/me/drive", {"id": OWN})
-    graph.on("GET", "/me/drive/root/children", lambda s: httpx.Response(200, json={
-        "value": [drive_item(f"n{i}", f"n{i}.txt") for i in range(3)]} if s.params.get("$skiptoken") else {
-        "value": [drive_item("a", "a.txt")], "@odata.nextLink": nxt}))
+    graph.on(
+        "GET",
+        "/me/drive/root/children",
+        lambda s: httpx.Response(
+            200,
+            json={"value": [drive_item(f"n{i}", f"n{i}.txt") for i in range(3)]}
+            if s.params.get("$skiptoken")
+            else {"value": [drive_item("a", "a.txt")], "@odata.nextLink": nxt},
+        ),
+    )
     first = await invoke("list_files", limit=3)
     assert not first.error, first.text
     more = await invoke("list_files", limit=1, cursor=first.data["cursor"])
@@ -792,10 +993,18 @@ async def test_a_partial_match_among_ones_own_sites_does_not_hide_the_exact_one(
 
 # -- round 3 -------------------------------------------------------------------------------------
 
+
 def remote_item(i, name, **kw):
     """What /me/drive/recent returns for a file in someone else's drive: the facts sit in remoteItem."""
-    inner = {"id": i, "name": name, "size": 555, "webUrl": f"https://x.test/{name}", "file": {"mimeType": "text/plain"},
-             "parentReference": {"driveId": "b!other"}, "fileSystemInfo": {"lastModifiedDateTime": "2026-10-21T08:00:00Z"}}
+    inner = {
+        "id": i,
+        "name": name,
+        "size": 555,
+        "webUrl": f"https://x.test/{name}",
+        "file": {"mimeType": "text/plain"},
+        "parentReference": {"driveId": "b!other"},
+        "fileSystemInfo": {"lastModifiedDateTime": "2026-10-21T08:00:00Z"},
+    }
     return {"id": i, "remoteItem": inner, "fileSystemInfo": {"lastAccessedDateTime": "2026-10-22T08:00:00Z"}, **kw}
 
 
@@ -826,10 +1035,15 @@ async def test_shared_items_say_who_made_them_and_drop_empty_site_folders(graph,
     # Round 3 (F12): "files Megan shared" could not be answered, and site folders and notebooks of
     # size 0 came back as files.
     graph.on("GET", "/me/drive", {"id": OWN})
-    theirs = drive_item("t", "theirs.docx", drive="b!other", createdBy={"user": {"displayName": "Megan", "email": "megan@x.test"}})
+    theirs = drive_item(
+        "t", "theirs.docx", drive="b!other", createdBy={"user": {"displayName": "Megan", "email": "megan@x.test"}}
+    )
     noise = drive_item("n", "Notebooks", drive="b!other", size=0)
-    graph.on("POST", "/search/query", {"value": [{"hitsContainers": [{"hits": [
-        {"resource": theirs}, {"resource": noise}]}]}]})
+    graph.on(
+        "POST",
+        "/search/query",
+        {"value": [{"hitsContainers": [{"hits": [{"resource": theirs}, {"resource": noise}]}]}]},
+    )
     r = await invoke("list_files", location="shared")
     assert [i["name"] for i in r.data["items"]] == ["theirs.docx"]
     assert r.data["items"][0]["created_by"] == "Megan"
@@ -893,12 +1107,15 @@ async def test_an_empty_file_with_an_extension_is_still_shared_with_you(graph, i
     empty = drive_item("e", "empty.txt", drive="b!other", size=0)
     empty["file"]["mimeType"] = "text/plain"
     noise = drive_item("n", "Contoso - All Staff Notebook", drive="b!other", size=0)
-    graph.on("POST", "/search/query", {"value": [{"hitsContainers": [{"hits": [{"resource": empty}, {"resource": noise}]}]}]})
+    graph.on(
+        "POST", "/search/query", {"value": [{"hitsContainers": [{"hits": [{"resource": empty}, {"resource": noise}]}]}]}
+    )
     r = await invoke("list_files", location="shared")
     assert [i["name"] for i in r.data["items"]] == ["empty.txt"]
 
 
 # -- round 4 ---------------------------------------------------------------------------------------
+
 
 def search_hits(*items):
     return {"value": [{"hitsContainers": [{"hits": [{"resource": m} for m in items]}]}]}
@@ -917,15 +1134,29 @@ async def test_recent_items_without_a_modified_time_are_dated_from_their_item(gr
     # Round 4 (F01): /me/drive/recent carries lastAccessedDateTime only, measured live; the filter compared
     # a field that is never there and answered 0, and the items showed no modified time or path.
     graph.on("GET", "/me/drive", {"id": OWN})
-    stub = {"id": "r1", "remoteItem": {"id": "r1", "name": "rec.mp4", "size": 5, "file": {"mimeType": "video/mp4"},
-            "parentReference": {"driveId": OWN}}, "fileSystemInfo": {"lastAccessedDateTime": "2026-10-25T06:00:00Z"}}
-    graph.on("GET", f"/drives/{OWN}/items/r1", drive_item("r1", "rec.mp4", path="/drive/root:/Recordings",
-             lastModifiedDateTime="2026-10-23T19:19:07Z"))
+    stub = {
+        "id": "r1",
+        "remoteItem": {
+            "id": "r1",
+            "name": "rec.mp4",
+            "size": 5,
+            "file": {"mimeType": "video/mp4"},
+            "parentReference": {"driveId": OWN},
+        },
+        "fileSystemInfo": {"lastAccessedDateTime": "2026-10-25T06:00:00Z"},
+    }
+    graph.on(
+        "GET",
+        f"/drives/{OWN}/items/r1",
+        drive_item("r1", "rec.mp4", path="/drive/root:/Recordings", lastModifiedDateTime="2026-10-23T19:19:07Z"),
+    )
     graph.on("GET", "/me/drive/recent", {"value": [stub]})
     r = await invoke("list_files", location="recent", modified_since="2026-10-19")
     assert not r.error, r.text
     item = r.data["items"][0]
-    assert item["name"] == "rec.mp4" and item["modified"].startswith("2026-10-23") and item["path"] == "Recordings/rec.mp4"
+    assert (
+        item["name"] == "rec.mp4" and item["modified"].startswith("2026-10-23") and item["path"] == "Recordings/rec.mp4"
+    )
     old = await invoke("list_files", location="recent", modified_since="2026-10-24")
     assert old.data["items"] == []
 
@@ -983,6 +1214,7 @@ async def test_the_shared_listing_fills_the_page_past_dropped_items(graph, invok
         start = seen.json["requests"][0]["from"]
         pages = {0: search_page(mine + theirs[:1], True), 4: search_page(theirs[1:], False)}
         return httpx.Response(200, json=pages[start])
+
     graph.on("POST", "/search/query", search)
     r = await invoke("list_files", location="shared", limit=3)
     assert [i["name"] for i in r.data["items"]] == ["theirs0.docx", "theirs1.docx", "theirs2.docx"]
@@ -1002,8 +1234,11 @@ async def test_a_query_that_finds_nothing_says_search_lags_and_matches_names_in_
     # Round 4 (F02): a file uploaded a minute ago, asked for by its exact name, was "not there".
     graph.on("GET", "/me/drive", {"id": OWN})
     graph.on("GET", "/me/drive/root:/Reports:/search\\(q='plan-final.txt'\\)", {"value": []})
-    graph.on("GET", "/me/drive/root:/Reports:/children", {"value": [
-        drive_item("f1", "plan-final.txt"), drive_item("f2", "other.txt")]})
+    graph.on(
+        "GET",
+        "/me/drive/root:/Reports:/children",
+        {"value": [drive_item("f1", "plan-final.txt"), drive_item("f2", "other.txt")]},
+    )
     r = await invoke("list_files", folder="Reports", query="plan-final.txt")
     assert [i["name"] for i in r.data["items"]] == ["plan-final.txt"]
     assert "minutes" in r.data["note"] and "name" in r.data["note"]
@@ -1070,14 +1305,16 @@ async def test_the_description_says_who_created_means_and_that_kind_site_needs_n
 
 # -- a delete names who loses access ------------------------------------------
 
+
 async def test_deleting_a_shared_file_names_the_people_who_lose_access(graph, invoke):
     graph.on("GET", "/me/drive/items/f1", drive_item("f1", "plan.docx"))
     graph.on("GET", "/me/drive/items/f1/permissions", PERMS)
     graph.on("DELETE", "/me/drive/items/f1", None, status=204)
     r = await invoke("update_file", action="delete", ids=["f1"])
     assert not r.error, r.text
-    assert r.data["shared_with"] == {"plan.docx (f1)": ["Bo <bo@x.test>", "Cy <cy@x.test>", "view link, users",
-                                                   "Di <di@x.test>", "ed@x.test"]}
+    assert r.data["shared_with"] == {
+        "plan.docx (f1)": ["Bo <bo@x.test>", "Cy <cy@x.test>", "view link, users", "Di <di@x.test>", "ed@x.test"]
+    }
     assert "no longer reach" in r.data["shared_note"]
     assert [s.method for s in graph.writes()] == ["DELETE"]
 
@@ -1102,7 +1339,9 @@ async def test_a_delete_still_happens_when_the_permissions_cannot_be_read(graph,
 
 async def test_a_throttled_permissions_read_is_not_swallowed(graph, invoke):
     graph.on("GET", "/me/drive/items/f1", drive_item("f1", "old.docx"))
-    graph.on("GET", "/me/drive/items/f1/permissions", {"error": {"code": "serviceNotAvailable", "message": "x"}}, status=503)
+    graph.on(
+        "GET", "/me/drive/items/f1/permissions", {"error": {"code": "serviceNotAvailable", "message": "x"}}, status=503
+    )
     graph.on("DELETE", "/me/drive/items/f1", None, status=204)
     r = await invoke("update_file", action="delete", ids=["f1"])
     assert r.error and graph.writes() == []
@@ -1135,6 +1374,7 @@ async def test_a_download_result_is_short_enough_to_cost_little_context(graph, i
 async def test_a_full_link_store_refuses_the_download_with_a_sentence(graph, invoke, rt):
     from m365_mcp.links.store import LinkStore
     from m365_mcp.links.tokens import LinkSigner
+
     graph.on("GET", "/me/drive/items/f1", drive_item("f1", "a.docx"))
     rt.signer = LinkSigner((b"s" * 32,), (b"e" * 32,), LinkStore(max_entries=0))
     r = await invoke("download_file", id="f1")
@@ -1152,4 +1392,5 @@ async def test_download_file_is_annotated_as_reading_only(server):
 async def test_kind_document_leaves_out_plain_text(graph, invoke):
     # kind=document included .txt, and the docx was on the second page.
     from m365_mcp.tools.files import _KIND_BY_EXT
+
     assert "txt" not in _KIND_BY_EXT["document"] and "docx" in _KIND_BY_EXT["document"]

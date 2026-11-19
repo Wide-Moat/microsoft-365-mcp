@@ -34,8 +34,9 @@ def test_description_reads_like_a_man_page(name):
     name_words = set(name.split("_"))
     first = [w.strip(".,:;").lower() for w in sentences[0].split()]
     assert len([w for w in first if w not in name_words]) >= 5, f"{name}: the first sentence only restates the name"
-    assert not re.search(r"\b[A-Z]{4,}\b(?<!HTML)(?<!JSON)", re.sub(r"\b(URL|HTML|JSON|MIME|PDF|VTT|MP4|KQL|UTC|BCC|CSS)\b", "", d)), \
-        f"{name}: shouted emphasis"
+    assert not re.search(
+        r"\b[A-Z]{4,}\b(?<!HTML)(?<!JSON)", re.sub(r"\b(URL|HTML|JSON|MIME|PDF|VTT|MP4|KQL|UTC|BCC|CSS)\b", "", d)
+    ), f"{name}: shouted emphasis"
 
 
 @pytest.mark.parametrize("name", sorted(SPECS))
@@ -80,13 +81,45 @@ def test_arguments_are_flat_and_described(name):
         ann = str(p.annotation)
         assert "dict[" not in ann, f"{name}.{p.name} is a nested object"
         self_explanatory = p.name in {
-            "id", "ids", "query", "limit", "cursor", "subject", "body", "cc", "bcc", "name", "title", "start", "end",
-            "unread_only", "has_attachments", "flagged", "include_body", "importance", "action", "body_format",
-            "status", "comment", "message", "response", "notes", "role", "since", "until", "values", "fields",
+            "id",
+            "ids",
+            "query",
+            "limit",
+            "cursor",
+            "subject",
+            "body",
+            "cc",
+            "bcc",
+            "name",
+            "title",
+            "start",
+            "end",
+            "unread_only",
+            "has_attachments",
+            "flagged",
+            "include_body",
+            "importance",
+            "action",
+            "body_format",
+            "status",
+            "comment",
+            "message",
+            "response",
+            "notes",
+            "role",
+            "since",
+            "until",
+            "values",
+            "fields",
         }
         if not self_explanatory:
-            assert "Field(" in ann or "description=" in ann or "Literal[" in ann or ann in ("<class 'bool'>",) or \
-                p.name.startswith("include_"), f"{name}.{p.name} needs a description"
+            assert (
+                "Field(" in ann
+                or "description=" in ann
+                or "Literal[" in ann
+                or ann in ("<class 'bool'>",)
+                or p.name.startswith("include_")
+            ), f"{name}.{p.name} needs a description"
 
 
 @pytest.mark.parametrize("name", sorted(n for n, s in SPECS.items() if s.returns_list))
@@ -110,6 +143,7 @@ async def test_a_tool_of_an_area_switched_off_is_refused(settings, token):
     from dataclasses import replace
 
     from m365_mcp.server import M365Server
+
     server = M365Server(replace(settings, areas=frozenset({"account"})))
     names = {t.name for t in await server.list_tools()}
     assert "send_draft" not in names
@@ -119,6 +153,7 @@ async def test_per_person_area_header_hides_and_refuses(server, token):
     from mcp.types import CallToolRequestParams
 
     from m365_mcp.identity import current_areas
+
     current_areas.set(frozenset({"calendar"}))
     names = {t.name for t in await server.list_tools()}
     assert "list_messages" not in names and "get_connection" in names
@@ -135,6 +170,7 @@ def test_every_area_publishes_a_tool_or_a_parameter():
 @pytest.mark.parametrize("name", sorted(n for n, s in SPECS.items() if s.gates))
 def test_gated_parameters_exist_and_name_a_known_area_or_switch(name):
     from m365_mcp.config import SWITCHES
+
     params = inspect.signature(SPECS[name].fn).parameters
     for param, (kind, gate) in SPECS[name].gates.items():
         assert param in params, f"{name}.{param}"
@@ -144,6 +180,7 @@ def test_gated_parameters_exist_and_name_a_known_area_or_switch(name):
 
 async def _call(server, name, **args):
     from mcp.types import CallToolRequestParams
+
     res = await server._handle_call_tool(None, CallToolRequestParams(name=name, arguments=args))
     return res.is_error, "".join(getattr(c, "text", "") for c in res.content)
 
@@ -152,6 +189,7 @@ async def test_a_parameter_behind_an_off_switch_is_hidden_and_refused(settings, 
     from dataclasses import replace
 
     from m365_mcp.server import M365Server
+
     server = M365Server(replace(settings, switches=frozenset()))
     tools = {t.name: t.input_schema["properties"] for t in await server.list_tools()}
     assert "include_transcript" not in tools["get_event"] and "include_body" in tools["get_event"]
@@ -169,6 +207,7 @@ async def test_a_parameter_behind_an_off_switch_is_hidden_and_refused(settings, 
 
 async def test_a_parameter_of_an_area_off_for_the_person_is_hidden_and_refused(server, token, graph):
     from m365_mcp.identity import current_areas
+
     tools = {t.name: t.input_schema["properties"] for t in await server.list_tools()}
     assert "include_recording" in tools["get_event"]
     current_areas.set(frozenset({"calendar"}))
@@ -183,6 +222,7 @@ async def test_a_parameter_of_an_area_off_for_the_installation_is_hidden(setting
     from dataclasses import replace
 
     from m365_mcp.server import M365Server
+
     server = M365Server(replace(settings, areas=settings.areas - {"recordings"}))
     tools = {t.name: t.input_schema["properties"] for t in await server.list_tools()}
     assert "include_recording" not in tools["get_event"]
@@ -207,8 +247,12 @@ def test_only_the_graph_client_speaks_http():
             continue
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "httpx" \
-                    and node.attr in {"get", "post", "put", "patch", "delete", "request", "AsyncClient", "Client"}:
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "httpx"
+                and node.attr in {"get", "post", "put", "patch", "delete", "request", "AsyncClient", "Client"}
+            ):
                 offenders.append(f"{rel}:{node.lineno}")
     assert offenders == []
 
@@ -216,16 +260,27 @@ def test_only_the_graph_client_speaks_http():
 def test_no_mailbox_or_user_selector_anywhere():
     for path in (SRC / "tools").rglob("*.py"):
         src = path.read_text()
-        assert not re.search(r"/users/\{[^}]+\}/(messages|mailFolders|events|calendar|drive|chats|contacts|todo|onenote)", src), path
+        assert not re.search(
+            r"/users/\{[^}]+\}/(messages|mailFolders|events|calendar|drive|chats|contacts|todo|onenote)", src
+        ), path
         for fn in ast.walk(ast.parse(src)):
             if isinstance(fn, ast.AsyncFunctionDef):
-                assert not {a.arg for a in fn.args.args + fn.args.kwonlyargs} & {"mailbox", "user_id", "tenant"}, \
+                assert not {a.arg for a in fn.args.args + fn.args.kwonlyargs} & {"mailbox", "user_id", "tenant"}, (
                     f"{path.name}:{fn.name}"
+                )
 
 
 def test_forbidden_capabilities_are_absent():
-    banned = ["messageRules", "forwardingSmtpAddress", "/delegates", "calendarPermissions", "permanentDelete",
-              '"anonymous"', "exportItems", "/delta"]
+    banned = [
+        "messageRules",
+        "forwardingSmtpAddress",
+        "/delegates",
+        "calendarPermissions",
+        "permanentDelete",
+        '"anonymous"',
+        "exportItems",
+        "/delta",
+    ]
     for path in SRC.rglob("*.py"):
         src = path.read_text()
         for b in banned:
@@ -234,6 +289,7 @@ def test_forbidden_capabilities_are_absent():
 
 def test_every_error_key_used_exists():
     from m365_mcp.core.errors import MESSAGES
+
     used = set()
     for path in SRC.rglob("*.py"):
         used |= set(re.findall(r'M365Error\("([a-z_]+)"', path.read_text()))
@@ -243,11 +299,13 @@ def test_every_error_key_used_exists():
 async def test_an_argument_the_tool_does_not_have_is_refused_before_graph(server, token, graph):
     # QA: save_event(recurrence="weekly") made one single event and reported success; send_message
     # (attachments_upload=1) sent a message without the file the caller thought it attached.
-    error, text = await _call(server, "save_event", subject="S", start="2026-10-30 10:00", duration_minutes=30,
-                              recurrence="weekly")
+    error, text = await _call(
+        server, "save_event", subject="S", start="2026-10-30 10:00", duration_minutes=30, recurrence="weekly"
+    )
     assert error and "recurrence" in text and "Nothing was done" in text
-    error, text = await _call(server, "send_message", to=["19:chat"], body="hi", attachments_upload=1,
-                              user_confirmed=True)
+    error, text = await _call(
+        server, "send_message", to=["19:chat"], body="hi", attachments_upload=1, user_confirmed=True
+    )
     assert error and "attachments_upload" in text
     assert graph.seen == []
 
@@ -255,8 +313,11 @@ async def test_an_argument_the_tool_does_not_have_is_refused_before_graph(server
 async def test_a_limit_below_one_is_refused(server, token, graph):
     graph.on("GET", "/me/calendarView", {"value": []})
     graph.on("GET", "/me/todo/lists", {"value": []})
-    for name, args in (("list_events", {"start": "2026-10-23", "end": "2026-10-24"}), ("list_tasks", {"query": "x"}),
-                       ("list_conversations", {})):
+    for name, args in (
+        ("list_events", {"start": "2026-10-23", "end": "2026-10-24"}),
+        ("list_tasks", {"query": "x"}),
+        ("list_conversations", {}),
+    ):
         for bad in (0, -5):
             error, text = await _call(server, name, limit=bad, **args)
             assert error and "limit is 1 to 25" in text, (name, text)

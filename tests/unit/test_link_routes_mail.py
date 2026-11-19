@@ -18,14 +18,32 @@ def client(rt):
 def an_unsent_draft(graph):
     """d1 is a draft made here and not sent; a test about another state registers its own answer."""
     from m365_mcp.tools.mail import DRAFT_MARK
-    graph.on("GET", "/me/messages/d1", {"id": "d1", "isDraft": True, "body": {"content": ""},
-                                        "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": "1"}]})
+
+    graph.on(
+        "GET",
+        "/me/messages/d1",
+        {
+            "id": "d1",
+            "isDraft": True,
+            "body": {"content": ""},
+            "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": "1"}],
+        },
+    )
 
 
 def link(rt, op, kind, target, **kw):
     from helpers import make_token
-    return rt.signer.issue(op=op, kind=kind, target=target, person="p1", token=make_token(),
-                           token_expires=int(time.time()) + 3600, ttl=300 if op == "d" else 180, **kw)
+
+    return rt.signer.issue(
+        op=op,
+        kind=kind,
+        target=target,
+        person="p1",
+        token=make_token(),
+        token_expires=int(time.time()) + 3600,
+        ttl=300 if op == "d" else 180,
+        **kw,
+    )
 
 
 def test_attachment_streams_bytes(rt, graph, client):
@@ -48,8 +66,17 @@ def test_download_link_cannot_upload(rt, client):
 
 def test_expired_link_is_403(rt, client, graph):
     from helpers import make_token
-    v = rt.signer.issue(op="d", kind="attachment", target={"m": "m", "a": "a"}, person="p", token=make_token(),
-                        token_expires=int(time.time()) + 3600, ttl=300, now=time.time() - 1000)
+
+    v = rt.signer.issue(
+        op="d",
+        kind="attachment",
+        target={"m": "m", "a": "a"},
+        person="p",
+        token=make_token(),
+        token_expires=int(time.time()) + 3600,
+        ttl=300,
+        now=time.time() - 1000,
+    )
     assert client.get(f"/d/{v}").status_code == 403
     assert graph.seen == []
 
@@ -108,12 +135,15 @@ def test_small_attachment_is_one_post(rt, graph, client):
 
 def test_large_attachment_uses_an_upload_session_in_ranges(rt, graph, client):
     size = 10 * 1024 * 1024
-    graph.on("POST", "/me/messages/d1/attachments/createUploadSession", {"uploadUrl": "https://outlook.office.com/up/1"})
+    graph.on(
+        "POST", "/me/messages/d1/attachments/createUploadSession", {"uploadUrl": "https://outlook.office.com/up/1"}
+    )
     ranges = []
 
     def put(seen):
         ranges.append((seen.headers["content-range"], len(seen.content)))
         return httpx.Response(200 if len(ranges) * ATTACH_CHUNK < size else 201, json={})
+
     graph.on("PUT", "https://outlook.office.com/up/1", put)
     v = link(rt, "u", "draft_attachment", {"d": "d1"}, max_bytes=150 * 1024 * 1024)
     r = client.put(f"/u/{v}", content=b"\1" * size, headers={"X-File-Name": "big.bin"})
@@ -122,7 +152,9 @@ def test_large_attachment_uses_an_upload_session_in_ranges(rt, graph, client):
     assert ranges[0][0] == f"bytes 0-{ATTACH_CHUNK - 1}/{size}"
     assert ranges[-1][0].endswith(f"-{size - 1}/{size}")
     assert sum(n for _, n in ranges) == size
-    assert not [s for s in graph.seen if s.path.startswith("https://outlook.office.com") and "authorization" in s.headers]
+    assert not [
+        s for s in graph.seen if s.path.startswith("https://outlook.office.com") and "authorization" in s.headers
+    ]
 
 
 def test_an_attachment_over_the_link_limit_is_413(rt, client, graph):
@@ -155,14 +187,22 @@ def test_attachment_without_a_file_name_is_rejected(rt, client, graph):
 
 def test_note_title_is_escaped_not_json_encoded(rt, graph, client):
     import httpx as hx
+
     seen = {}
 
     def create(s):
         seen["body"] = s.content.decode()
         return hx.Response(201, json={"id": "p1"})
+
     graph.on("POST", "/me/onenote/sections/S/pages", create)
-    v = link(rt, "u", "note_body", {"s": "S", "title": "</title><img src=https://x>Grüße ü"}, max_bytes=10_000,
-             content_type="text/html")
+    v = link(
+        rt,
+        "u",
+        "note_body",
+        {"s": "S", "title": "</title><img src=https://x>Grüße ü"},
+        max_bytes=10_000,
+        content_type="text/html",
+    )
     r = client.put(f"/u/{v}", content=b"<p>x</p>", headers={"Content-Type": "text/html"})
     assert r.status_code == 200, r.text
     assert "<img src=https://x>" not in seen["body"] and "&lt;/title&gt;" in seen["body"] and "Grüße ü" in seen["body"]
@@ -171,14 +211,17 @@ def test_note_title_is_escaped_not_json_encoded(rt, graph, client):
 def test_an_uploaded_page_body_keeps_the_page_title(rt, graph, client):
     # Measured: a body PATCH soon after creation empties the listed title unless the title goes along.
     from datetime import UTC, datetime
+
     graph.on("GET", "/me/onenote/pages/p1/content", b"<html><head><title>Plan</title></head><body></body></html>")
     graph.on("GET", "/me/onenote/pages/p1", {"id": "p1", "title": "", "createdDateTime": datetime.now(UTC).isoformat()})
     graph.on("PATCH", "/me/onenote/pages/p1/content", None, status=204)
     v = link(rt, "u", "note_body", {"page": "p1", "a": "append"}, max_bytes=10_000, content_type="text/html")
     r = client.put(f"/u/{v}", content=b"<p>x</p>", headers={"Content-Type": "text/html"})
     assert r.status_code == 200, r.text
-    assert graph.writes()[0].json == [{"target": "title", "action": "replace", "content": "Plan"},
-                                      {"target": "body", "action": "append", "content": "<p>x</p>"}]
+    assert graph.writes()[0].json == [
+        {"target": "title", "action": "replace", "content": "Plan"},
+        {"target": "body", "action": "append", "content": "<p>x</p>"},
+    ]
 
 
 def test_an_upstream_answer_without_an_upload_url_is_502_not_500(rt, graph, client):
@@ -190,11 +233,22 @@ def test_an_upstream_answer_without_an_upload_url_is_502_not_500(rt, graph, clie
 
 def test_an_uploaded_body_replaces_the_drafts_own_part_and_keeps_a_quoted_one(rt, graph, client):
     from m365_mcp.tools.mail import DRAFT_MARK
+
     part = f"{NEW_PART_ID}-abc123abc123"
-    body = (f'<html><body><div id="{part}"><p>first</p></div><hr><div id="divRplyFwdMsg">From: Bo</div>'
-            f'<div><div id="{NEW_PART_ID}"><p>QUOTED LETTER</p></div></div></body></html>')
-    graph.on("GET", "/me/messages/d1", {"id": "d1", "isDraft": True, "body": {"content": body},
-                                        "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": part}]})
+    body = (
+        f'<html><body><div id="{part}"><p>first</p></div><hr><div id="divRplyFwdMsg">From: Bo</div>'
+        f'<div><div id="{NEW_PART_ID}"><p>QUOTED LETTER</p></div></div></body></html>'
+    )
+    graph.on(
+        "GET",
+        "/me/messages/d1",
+        {
+            "id": "d1",
+            "isDraft": True,
+            "body": {"content": body},
+            "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": part}],
+        },
+    )
     graph.on("PATCH", "/me/messages/d1", {})
     v = link(rt, "u", "draft_body", {"d": "d1"}, max_bytes=10_000, content_type="text/html")
     r = client.put(f"/u/{v}", content=b"<p>second</p>", headers={"Content-Type": "text/html"})
@@ -205,14 +259,31 @@ def test_an_uploaded_body_replaces_the_drafts_own_part_and_keeps_a_quoted_one(rt
 
 def test_a_body_cannot_be_uploaded_to_a_draft_already_sent(rt, graph, client):
     from m365_mcp.tools.mail import DRAFT_MARK
-    graph.on("GET", "/me/messages/d1", {"id": "d1", "isDraft": True, "body": {"content": ""},
-                                        "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": "sent"}]})
+
+    graph.on(
+        "GET",
+        "/me/messages/d1",
+        {
+            "id": "d1",
+            "isDraft": True,
+            "body": {"content": ""},
+            "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": "sent"}],
+        },
+    )
     v = link(rt, "u", "draft_body", {"d": "d1"}, max_bytes=10_000, content_type="text/html")
     r = client.put(f"/u/{v}", content=b"<p>late</p>", headers={"Content-Type": "text/html"})
     assert r.status_code == 422 and "already sent" in r.text and graph.writes() == []
 
 
-@pytest.mark.parametrize("name", ["Reunión_presupuesto.docx", "family \U0001f468\u200d\U0001f469\u200d\U0001f467.png", "\u03b1\u03bd\u03b1\u03c6\u03bf\u03c1\u03ac.txt", "emoji 📎.txt"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Reunión_presupuesto.docx",
+        "family \U0001f468\u200d\U0001f469\u200d\U0001f467.png",
+        "\u03b1\u03bd\u03b1\u03c6\u03bf\u03c1\u03ac.txt",
+        "emoji 📎.txt",
+    ],
+)
 def test_a_utf8_file_name_is_kept_as_sent(rt, graph, client, name):
     # curl sends the header's UTF-8 bytes; read as Latin-1 they became
     # "ReuniÃ³n_presupuesto.docx", in the draft and at the recipient.
@@ -232,9 +303,9 @@ def test_a_percent_encoded_file_name_is_decoded(rt, graph, client):
     assert graph.calls("POST", "/me/messages/d1/attachments")[0].json["name"] == "Reunión_pct.txt"
 
 
-
 def test_header_bytes_that_are_not_utf8_stay_latin1():
     from m365_mcp.links.routes import _header_text
+
     assert _header_text(b"caf\xe9.txt".decode("latin-1")) == "caf\xe9.txt"  # not valid UTF-8
     assert _header_text("Reunión.docx".encode().decode("latin-1")) == "Reunión.docx"
 
@@ -247,10 +318,15 @@ def test_a_bidi_override_is_dropped_from_a_file_name(rt, graph, client):
     assert graph.calls("POST", "/me/messages/d1/attachments")[0].json["name"] == "invoicefdp.exe"
 
 
-@pytest.mark.parametrize("name, sent, want", [("scan.pdf", "application/octet-stream", "application/pdf"),
-                                               ("banner.png", None, "image/png"),
-                                               ("data.bin", "application/octet-stream", "application/octet-stream"),
-                                               ("a.pdf", "text/plain", "text/plain")])
+@pytest.mark.parametrize(
+    "name, sent, want",
+    [
+        ("scan.pdf", "application/octet-stream", "application/pdf"),
+        ("banner.png", None, "image/png"),
+        ("data.bin", "application/octet-stream", "application/octet-stream"),
+        ("a.pdf", "text/plain", "text/plain"),
+    ],
+)
 def test_an_attachment_without_a_real_type_gets_one_from_its_name(rt, graph, client, name, sent, want):
     # Every attachment arrived as application/octet-stream.
     graph.on("POST", "/me/messages/d1/attachments", {"id": "a"})
@@ -264,8 +340,16 @@ def test_an_attachment_without_a_real_type_gets_one_from_its_name(rt, graph, cli
 @pytest.mark.parametrize("state", ["sent_mark", "not_a_draft"])
 def test_an_attachment_cannot_be_uploaded_to_a_draft_already_sent(rt, graph, client, state):
     from m365_mcp.tools.mail import DRAFT_MARK
-    graph.on("GET", "/me/messages/d1", {"id": "d1", "isDraft": state != "not_a_draft", "singleValueExtendedProperties": [
-        {"id": DRAFT_MARK, "value": "sent" if state == "sent_mark" else "1"}]})
+
+    graph.on(
+        "GET",
+        "/me/messages/d1",
+        {
+            "id": "d1",
+            "isDraft": state != "not_a_draft",
+            "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": "sent" if state == "sent_mark" else "1"}],
+        },
+    )
     graph.on("POST", "/me/messages/d1/attachments", {"id": "a"})
     v = link(rt, "u", "draft_attachment", {"d": "d1"}, max_bytes=1000)
     r = client.put(f"/u/{v}", content=b"late", headers={"X-File-Name": "late.txt"})
@@ -275,18 +359,29 @@ def test_an_attachment_cannot_be_uploaded_to_a_draft_already_sent(rt, graph, cli
 
 async def test_sending_a_draft_revokes_its_upload_links(graph, invoke, rt):
     from m365_mcp.tools.mail import DRAFT_MARK
+
     graph.on("POST", "/me/messages", {"id": "d1"})
     graph.on("PATCH", "/me/messages/d1", {})
     graph.on("POST", "/me/messages/d1/send", None, status=202)
-    graph.on("GET", "/me/messages/d1", {"id": "d1", "isDraft": True, "subject": "S", "body": {"content": ""},
-                                        "toRecipients": [{"emailAddress": {"address": "ann@x.test"}}],
-                                        "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": "1"}]})
+    graph.on(
+        "GET",
+        "/me/messages/d1",
+        {
+            "id": "d1",
+            "isDraft": True,
+            "subject": "S",
+            "body": {"content": ""},
+            "toRecipients": [{"emailAddress": {"address": "ann@x.test"}}],
+            "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": "1"}],
+        },
+    )
     r = await invoke("save_draft", subject="S", to=["ann@x.test"], body_upload=True, attachments_upload=2)
     assert not r.error, r.text
     values = [cmd.rsplit("/u/", 1)[1].rstrip("'") for cmd in [r.data["body_upload"], *r.data["attachment_uploads"]]]
     other = link(rt, "u", "draft_attachment", {"d": "d2"}, max_bytes=1000)
     assert not (await invoke("send_draft", id="d1", user_confirmed=True)).error
     from m365_mcp.links.tokens import LinkRefused
+
     for v in values:
         with pytest.raises(LinkRefused):
             rt.signer.verify(v, op="u")
@@ -295,10 +390,20 @@ async def test_sending_a_draft_revokes_its_upload_links(graph, invoke, rt):
 
 def _draft_with_links(graph):
     from m365_mcp.tools.mail import DRAFT_MARK
+
     graph.on("POST", "/me/messages", {"id": "d1"})
-    graph.on("GET", "/me/messages/d1", {"id": "d1", "isDraft": True, "subject": "S", "body": {"content": ""},
-                                        "toRecipients": [{"emailAddress": {"address": "ann@x.test"}}],
-                                        "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": "1"}]})
+    graph.on(
+        "GET",
+        "/me/messages/d1",
+        {
+            "id": "d1",
+            "isDraft": True,
+            "subject": "S",
+            "body": {"content": ""},
+            "toRecipients": [{"emailAddress": {"address": "ann@x.test"}}],
+            "singleValueExtendedProperties": [{"id": DRAFT_MARK, "value": "1"}],
+        },
+    )
 
 
 async def _links(invoke) -> list[str]:
@@ -330,6 +435,7 @@ async def test_an_upload_starting_while_the_draft_is_marked_sent_stops_the_send(
         if "sent" in str(seen.json):
             rt.signer.claim(values[1])
         return httpx.Response(200, json={})
+
     graph.on("PATCH", "/me/messages/d1", mark)
     graph.on("POST", "/me/messages/d1/send", None, status=202)
     r = await invoke("send_draft", id="d1", user_confirmed=True)

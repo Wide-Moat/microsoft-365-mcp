@@ -2,7 +2,7 @@
 
 import pytest
 
-from m365_mcp.links.store import LinkStore, LinksFull
+from m365_mcp.links.store import LinksFull, LinkStore
 
 
 def test_an_id_returns_the_value_it_was_given_until_it_expires():

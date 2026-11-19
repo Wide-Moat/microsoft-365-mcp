@@ -4,8 +4,14 @@ from m365_mcp.config import ConfigError, Settings
 
 
 def env(monkeypatch, **kw):
-    for k in ("M365_AREAS", "M365_SWITCHES", "M365_LINK_SECRET", "M365_LINK_SIGNING_KEYS",
-              "M365_LINK_ENCRYPTION_KEYS", "M365_LINKS_BASE_URL"):
+    for k in (
+        "M365_AREAS",
+        "M365_SWITCHES",
+        "M365_LINK_SECRET",
+        "M365_LINK_SIGNING_KEYS",
+        "M365_LINK_ENCRYPTION_KEYS",
+        "M365_LINKS_BASE_URL",
+    ):
         monkeypatch.delenv(k, raising=False)
     for k, v in kw.items():
         monkeypatch.setenv(k, v)

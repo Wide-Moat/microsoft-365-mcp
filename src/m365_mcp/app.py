@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import contextlib
-import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -59,14 +58,17 @@ class Identity:
 
 def build(settings: Settings) -> tuple[Starlette, Starlette]:
     install_filter()
-    configure(Runtime(
-        settings=settings,
-        signer=LinkSigner(settings.sign_keys, settings.enc_keys, LinkStore()) if settings.links_ready else None,
-        cursors=Cursors(settings.sign_keys[0] if settings.sign_keys else None),
-    ))
+    configure(
+        Runtime(
+            settings=settings,
+            signer=LinkSigner(settings.sign_keys, settings.enc_keys, LinkStore()) if settings.links_ready else None,
+            cursors=Cursors(settings.sign_keys[0] if settings.sign_keys else None),
+        )
+    )
     server = M365Server(settings)
-    mcp_app = server.streamable_http_app(streamable_http_path="/mcp", json_response=True, stateless_http=True,
-                                         host="0.0.0.0")
+    mcp_app = server.streamable_http_app(
+        streamable_http_path="/mcp", json_response=True, stateless_http=True, host="0.0.0.0"
+    )
 
     async def healthz(_: Request) -> Response:
         return JSONResponse({"ok": True})
@@ -82,10 +84,15 @@ def build(settings: Settings) -> tuple[Starlette, Starlette]:
         async with mcp_app.router.lifespan_context(app):
             yield
 
-    main = Starlette(routes=[
-        Route("/healthz", healthz), Route("/readyz", readyz), Route("/metrics", metrics),
-        Mount("/", app=Identity(mcp_app)),
-    ], lifespan=lifespan)
+    main = Starlette(
+        routes=[
+            Route("/healthz", healthz),
+            Route("/readyz", readyz),
+            Route("/metrics", metrics),
+            Mount("/", app=Identity(mcp_app)),
+        ],
+        lifespan=lifespan,
+    )
     return main, links_app()
 
 

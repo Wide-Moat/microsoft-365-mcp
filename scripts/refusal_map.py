@@ -83,8 +83,12 @@ def parse(paths: list[Path], root: Path = ROOT) -> Parsed:
 
 def collected(root: Path = ROOT) -> set[str]:
     """Test ids pytest collects under tests/unit, without parameters, relative to tests/unit."""
-    proc = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", TEST_ROOT],
-                          cwd=root, capture_output=True, text=True)
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", TEST_ROOT],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
     ids = {line.split("[", 1)[0].removeprefix(TEST_ROOT + "/") for line in proc.stdout.splitlines() if "::" in line}
     if proc.returncode != 0 or not ids:
         raise RuntimeError(f"pytest collected nothing usable (exit {proc.returncode})")
@@ -96,8 +100,10 @@ def check(parsed: Parsed, known: set[str]) -> list[str]:
     if parsed.tables == 0 or not parsed.rows:
         problems.append("no Must refuse rows were found: the documents moved or the parser is broken")
     if parsed.headers_seen != parsed.tables:
-        problems.append(f"{parsed.headers_seen} table lines mention Must refuse but {parsed.tables} were parsed: "
-                        "a header is written in a form the parser does not read")
+        problems.append(
+            f"{parsed.headers_seen} table lines mention Must refuse but {parsed.tables} were parsed: "
+            "a header is written in a form the parser does not read"
+        )
     owner: dict[str, Row] = {}
     for r in parsed.rows:
         where = f"{r.doc}:{r.line} ({r.refusal[:60]})"
@@ -126,8 +132,10 @@ def main() -> int:
         for t in r.tests:
             print(f"    {t}")
     docs = len({r.doc for r in parsed.rows})
-    print(f"\n{len(parsed.rows)} rows in {parsed.tables} tables across {docs} documents, "
-          f"{len(mapped_tests(parsed))} tests, {len(problems)} problems")
+    print(
+        f"\n{len(parsed.rows)} rows in {parsed.tables} tables across {docs} documents, "
+        f"{len(mapped_tests(parsed))} tests, {len(problems)} problems"
+    )
     for p in problems:
         print(" -", p)
     return 1 if problems else 0

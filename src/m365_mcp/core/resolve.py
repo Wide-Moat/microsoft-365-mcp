@@ -18,8 +18,9 @@ _EMAIL = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$")
 _ANGLE = re.compile(r"<([^<>@\s]+@[^<>\s]+)>")
 
 
-def one(query: str, items: Iterable[T], *, kind: str, name: Callable[[T], str],
-        label: Callable[[T], str] | None = None) -> T:
+def one(
+    query: str, items: Iterable[T], *, kind: str, name: Callable[[T], str], label: Callable[[T], str] | None = None
+) -> T:
     """Exact (case-insensitive) match wins; otherwise a single partial match; otherwise refuse."""
     items = list(items)
     q = query.strip().casefold()
@@ -59,25 +60,42 @@ def _who_from_person(p: dict[str, Any]) -> Who | None:
         return None
     ptype = (p.get("personType") or {}).get("class", "")
     sub = (p.get("personType") or {}).get("subclass", "")
-    return Who(name=p.get("displayName") or "", address=addr, is_group=ptype == "Group",
-               job_title=p.get("jobTitle"), department=p.get("department"),
-               source="contacts" if sub == "PersonalContact" else "directory")
+    return Who(
+        name=p.get("displayName") or "",
+        address=addr,
+        is_group=ptype == "Group",
+        job_title=p.get("jobTitle"),
+        department=p.get("department"),
+        source="contacts" if sub == "PersonalContact" else "directory",
+    )
 
 
 async def people(c: Call, query: str, *, limit: int = 10, directory: bool = True) -> list[Who]:
     """People relevant to the person: their contacts, colleagues and groups, ranked by Microsoft."""
     q = query.replace('"', "")
     found: list[Who] = []
-    body = await c.graph.get("/me/people", params={"$search": f'"{q}"', "$top": str(limit),
-                                                   "$select": "displayName,scoredEmailAddresses,userPrincipalName,personType,jobTitle,department"})
+    body = await c.graph.get(
+        "/me/people",
+        params={
+            "$search": f'"{q}"',
+            "$top": str(limit),
+            "$select": "displayName,scoredEmailAddresses,userPrincipalName,personType,jobTitle,department",
+        },
+    )
     for p in body.get("value", []):
         w = _who_from_person(p)
         if w:
             found.append(w)
     if not found and directory:
-        body = await c.graph.get("/users", params={"$search": f'"displayName:{q}" OR "mail:{q}"', "$top": str(limit),
-                                                   "$select": "displayName,mail,userPrincipalName,jobTitle,department"},
-                                 headers={"ConsistencyLevel": "eventual"})
+        body = await c.graph.get(
+            "/users",
+            params={
+                "$search": f'"displayName:{q}" OR "mail:{q}"',
+                "$top": str(limit),
+                "$select": "displayName,mail,userPrincipalName,jobTitle,department",
+            },
+            headers={"ConsistencyLevel": "eventual"},
+        )
         for u in body.get("value", []):
             addr = u.get("mail") or u.get("userPrincipalName")
             if addr:
@@ -97,6 +115,7 @@ def _words_match(query: str, *fields: str | None) -> bool:
 
 class Contacts(list):
     """Matching contacts; `complete` is False when the person has more than the pages read."""
+
     complete = True
 
 
@@ -115,12 +134,23 @@ async def contacts(c: Call, query: str, *, names_only: bool = False) -> Contacts
             emails = [e.get("address") for e in ct.get("emailAddresses") or [] if e.get("address")]
             if not emails:
                 continue
-            fields = [ct.get("displayName")] if names_only else [ct.get("displayName"), ct.get("companyName"),
-                                                                 ct.get("jobTitle"), *emails]
+            fields = (
+                [ct.get("displayName")]
+                if names_only
+                else [ct.get("displayName"), ct.get("companyName"), ct.get("jobTitle"), *emails]
+            )
             exact = next((e for e in emails if e.casefold() == q.casefold()), None)
             if exact or _words_match(q, *fields):
-                out.append(Who(name=ct.get("displayName") or "", address=exact or emails[0], job_title=ct.get("jobTitle"),
-                               department=ct.get("department"), source="contacts", contact_id=ct.get("id")))
+                out.append(
+                    Who(
+                        name=ct.get("displayName") or "",
+                        address=exact or emails[0],
+                        job_title=ct.get("jobTitle"),
+                        department=ct.get("department"),
+                        source="contacts",
+                        contact_id=ct.get("id"),
+                    )
+                )
 
     async def read_all(path: str, params: dict[str, str] | None = None) -> tuple[list[dict[str, Any]], bool]:
         """The items of a collection that the page budget allows, and whether that was all of them."""
@@ -145,8 +175,9 @@ async def contacts(c: Call, query: str, *, names_only: bool = False) -> Contacts
         if not whole:
             out.complete = False
             return out
-        children, whole = await read_all("/me/contactFolders" if base == "/me" else f"{base}/childFolders",
-                                         {"$top": "100", "$select": "id"})
+        children, whole = await read_all(
+            "/me/contactFolders" if base == "/me" else f"{base}/childFolders", {"$top": "100", "$select": "id"}
+        )
         if not whole:
             out.complete = False
             return out
@@ -162,8 +193,9 @@ async def _organisation_domains(c: Call) -> frozenset[str]:
     if hit and hit[1] > time.monotonic():
         return hit[0]
     body = await c.graph.get("/organization", params={"$select": "verifiedDomains"})
-    names = frozenset(d["name"].casefold() for org in body.get("value", [])
-                      for d in org.get("verifiedDomains") or [] if d.get("name"))
+    names = frozenset(
+        d["name"].casefold() for org in body.get("value", []) for d in org.get("verifiedDomains") or [] if d.get("name")
+    )
     c.rt.domain_cache[c.person.tenant] = (names, time.monotonic() + DOMAIN_TTL)
     return names
 
@@ -188,9 +220,14 @@ async def outside_organisation(c: Call, addresses: list[str]) -> list[str] | Non
 
 async def _directory_user(c: Call, address: str) -> dict[str, Any] | None:
     a = address.replace("'", "''")
-    body = await c.graph.get("/users", params={
-        "$filter": f"mail eq '{a}' or userPrincipalName eq '{a}'", "$top": "1",
-        "$select": "displayName,mail,userPrincipalName,jobTitle,department"})
+    body = await c.graph.get(
+        "/users",
+        params={
+            "$filter": f"mail eq '{a}' or userPrincipalName eq '{a}'",
+            "$top": "1",
+            "$select": "displayName,mail,userPrincipalName,jobTitle,department",
+        },
+    )
     users = body.get("value") or []
     return users[0] if users else None
 
@@ -206,11 +243,13 @@ async def classify(c: Call, address: str, known: Who | None = None) -> Who:
         return known
     user = await _directory_user(c, address)
     if user:
-        return Who(name=user.get("displayName") or (known.name if known else ""),
-                   address=user.get("mail") or address,
-                   job_title=user.get("jobTitle") or (known.job_title if known else None),
-                   department=user.get("department") or (known.department if known else None),
-                   source=known.source if known else "directory")
+        return Who(
+            name=user.get("displayName") or (known.name if known else ""),
+            address=user.get("mail") or address,
+            job_title=user.get("jobTitle") or (known.job_title if known else None),
+            department=user.get("department") or (known.department if known else None),
+            source=known.source if known else "directory",
+        )
     domain = address.rpartition("@")[2].casefold().rstrip(".")
     if any(domain == d or domain.endswith("." + d) for d in await _organisation_domains(c)):
         return Who(name=known.name if known else "", address=address, is_group=True, source="directory")
@@ -238,9 +277,11 @@ async def person(c: Call, query: str) -> Who:
     own = await contacts(c, q, names_only=True)
     if not own.complete:
         # A second match past the pages read would make this name ambiguous without anyone knowing.
-        raise invalid(f"There are too many personal contacts or contact folders to read them all here (the "
-                      f"limit is {MAX_CONTACT_PAGES} requests), so a name cannot be checked against all of them. "
-                      "Give the person's address instead.")
+        raise invalid(
+            f"There are too many personal contacts or contact folders to read them all here (the "
+            f"limit is {MAX_CONTACT_PAGES} requests), so a name cannot be checked against all of them. "
+            "Give the person's address instead."
+        )
     ranked = await people(c, q)
     # People's word that an address is a group outlives a contact holding it, whatever either is called.
     groups = {w.address.casefold() for w in ranked if w.is_group}
@@ -280,9 +321,17 @@ def groups_among(ws: list[Who]) -> list[str]:
 # -- mail folders -------------------------------------------------------------------------
 
 WELL_KNOWN = {
-    "inbox": "inbox", "sent": "sentitems", "sent items": "sentitems", "drafts": "drafts",
-    "deleted": "deleteditems", "deleted items": "deleteditems", "trash": "deleteditems",
-    "archive": "archive", "junk": "junkemail", "spam": "junkemail", "outbox": "outbox",
+    "inbox": "inbox",
+    "sent": "sentitems",
+    "sent items": "sentitems",
+    "drafts": "drafts",
+    "deleted": "deleteditems",
+    "deleted items": "deleteditems",
+    "trash": "deleteditems",
+    "archive": "archive",
+    "junk": "junkemail",
+    "spam": "junkemail",
+    "outbox": "outbox",
 }
 SYSTEM_FOLDER_IDS = set(WELL_KNOWN.values())
 
@@ -291,7 +340,9 @@ async def _all_folders(c: Call) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
 
     async def walk(path: str, prefix: str, depth: int) -> None:
-        page = await c.graph.page(path, params={"$top": "100", "$select": "id,displayName,totalItemCount,unreadItemCount,childFolderCount"})
+        page = await c.graph.page(
+            path, params={"$top": "100", "$select": "id,displayName,totalItemCount,unreadItemCount,childFolderCount"}
+        )
         items = list(page.items)
         while page.next_link and len(items) < 1000:
             page = await c.graph.page(page.next_link)

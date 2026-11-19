@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from html import escape as html_escape
 import mimetypes
 import tempfile
 import unicodedata
 from collections.abc import AsyncIterator
+from html import escape as html_escape
 from typing import Any
 from urllib.parse import quote, unquote
 
@@ -33,9 +33,9 @@ from m365_mcp.observability import LINK_BYTES, LINK_TRANSFERS
 SPOOL_MEMORY = 8 * 1024 * 1024
 READ_CHUNK = 64 * 1024
 ATTACH_SINGLE_LIMIT = 3 * 1024 * 1024
-ATTACH_CHUNK = 10 * 320 * 1024          # under Graph's 4 MB per range for attachments
+ATTACH_CHUNK = 10 * 320 * 1024  # under Graph's 4 MB per range for attachments
 DRIVE_SINGLE_LIMIT = 4 * 1024 * 1024
-DRIVE_CHUNK = 32 * 320 * 1024           # a multiple of 320 KiB, as drive upload sessions require
+DRIVE_CHUNK = 32 * 320 * 1024  # a multiple of 320 KiB, as drive upload sessions require
 # Every upload is spooled before it goes to Graph. Uploads running at once share this much spool, so many
 # parallel PUTs, each under its own link's limit, cannot fill the disk; past it a body waits for a retry.
 SPOOL_TOTAL = 1024 * 1024 * 1024
@@ -97,7 +97,9 @@ def _graph_failed(e: GraphError, status: int) -> Response:
     retry loop can honour it; anything else is the status given, never a detail of the object."""
     if e.status in (429, 503):
         wait = e.retry_after or THROTTLED_WAIT
-        return JSONResponse({"error": to_person_error(e).text}, status_code=e.status, headers={"Retry-After": str(wait)})
+        return JSONResponse(
+            {"error": to_person_error(e).text}, status_code=e.status, headers={"Retry-After": str(wait)}
+        )
     return JSONResponse({"error": to_person_error(e).text}, status_code=status)
 
 
@@ -141,8 +143,13 @@ async def download(request: Request) -> Response:
         if params and e.status in (400, 406, 415, 422):
             # Measured: an empty workbook's conversion answers 400 from the conversion host. The file is
             # there; the PDF is what cannot be made.
-            return JSONResponse({"error": "Microsoft 365 could not convert this file to PDF; it may be empty or "
-                                          "damaged. Download the original instead."}, status_code=422)
+            return JSONResponse(
+                {
+                    "error": "Microsoft 365 could not convert this file to PDF; it may be empty or "
+                    "damaged. Download the original instead."
+                },
+                status_code=422,
+            )
         return _graph_failed(e, 502 if e.status >= 500 else 404)
     except httpx.HTTPError:
         await graph.aclose()
@@ -189,10 +196,15 @@ async def download(request: Request) -> Response:
         # A range of an encoded body cannot be decoded on its own, and its offsets are not the file's.
         await release()
         LINK_TRANSFERS.labels("d", link.kind, "upstream_error").inc()
-        return JSONResponse({"error": "Microsoft 365 sent this part compressed. Download the whole file, "
-                                      "without a Range header."}, status_code=502)
-    passed = ("content-type", "content-range", "accept-ranges") if encoded else (
-        "content-type", "content-length", "content-range", "accept-ranges")
+        return JSONResponse(
+            {"error": "Microsoft 365 sent this part compressed. Download the whole file, without a Range header."},
+            status_code=502,
+        )
+    passed = (
+        ("content-type", "content-range", "accept-ranges")
+        if encoded
+        else ("content-type", "content-length", "content-range", "accept-ranges")
+    )
     out = {k: v for k, v in upstream.headers.items() if k.lower() in passed}
     name = link.target.get("n")
     if name:
@@ -205,6 +217,7 @@ async def download(request: Request) -> Response:
     async def done() -> None:
         LINK_BYTES.labels("d").inc(sent)
         await release()
+
     return _Released(body(), done, status_code=upstream.status_code, headers=out)
 
 
@@ -249,28 +262,45 @@ async def _spool(request: Any, limit: int | None) -> tuple[tempfile.SpooledTempo
         except StopAsyncIteration:
             break
         except TimeoutError:
-            return refuse({"error": "The upload stalled or took too long, so it was cut off. Nothing was saved. "
-                                    "Send it again."}, 408)
+            return refuse(
+                {"error": "The upload stalled or took too long, so it was cut off. Nothing was saved. Send it again."},
+                408,
+            )
         except BaseException:
             spool.close()
             budget.give(size)
             raise
         if limit is not None and size + len(chunk) > limit:
             # The limit is the link's own, not anyone's data: naming it is what lets the file be fixed.
-            return refuse({"error": f"The upload is larger than this link accepts: at most {limit} bytes "
-                                    f"({_size(limit)}). Nothing was saved."}, 413)
+            return refuse(
+                {
+                    "error": f"The upload is larger than this link accepts: at most {limit} bytes "
+                    f"({_size(limit)}). Nothing was saved."
+                },
+                413,
+            )
         if not budget.take(len(chunk)):
-            return refuse({"error": "The server is receiving too many uploads at once. Nothing was saved. Send it "
-                                    f"again in {SPOOL_RETRY_AFTER} seconds with the same link."}, 503,
-                          {"Retry-After": str(SPOOL_RETRY_AFTER)})
+            return refuse(
+                {
+                    "error": "The server is receiving too many uploads at once. Nothing was saved. Send it "
+                    f"again in {SPOOL_RETRY_AFTER} seconds with the same link."
+                },
+                503,
+                {"Retry-After": str(SPOOL_RETRY_AFTER)},
+            )
         try:
             spool.write(chunk)
         except OSError:
             # The disk under the spool is full (or failing): the chunk's bytes go back with the rest.
             budget.give(len(chunk))
-            return refuse({"error": "The server has no room to receive this upload now. Nothing was saved. Send "
-                                    f"it again in {SPOOL_RETRY_AFTER} seconds with the same link."}, 507,
-                          {"Retry-After": str(SPOOL_RETRY_AFTER)})
+            return refuse(
+                {
+                    "error": "The server has no room to receive this upload now. Nothing was saved. Send "
+                    f"it again in {SPOOL_RETRY_AFTER} seconds with the same link."
+                },
+                507,
+                {"Retry-After": str(SPOOL_RETRY_AFTER)},
+            )
         size += len(chunk)
     spool.seek(0)
     return spool, size
@@ -296,8 +326,10 @@ async def upload(request: Request) -> Response:
     value = request.path_params["value"]
     if signer is None or not signer.claim(value):
         LINK_TRANSFERS.labels("u", link.kind, "busy").inc()
-        return JSONResponse({"error": "This link is already receiving an upload; one link takes one file, once. "
-                                      "Nothing was saved."}, status_code=409)
+        return JSONResponse(
+            {"error": "This link is already receiving an upload; one link takes one file, once. Nothing was saved."},
+            status_code=409,
+        )
     # Spent only once a file was delivered; a body the link refused leaves it for the corrected one.
     delivered = False
     try:
@@ -314,8 +346,13 @@ async def upload(request: Request) -> Response:
 async def _receive(request: Request, link: Link) -> Response:
     ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if link.content_type and ctype != link.content_type:
-        return JSONResponse({"error": f"This link takes {link.content_type} only: send it with the header "
-                                      f"Content-Type: {link.content_type}. Nothing was saved."}, status_code=415)
+        return JSONResponse(
+            {
+                "error": f"This link takes {link.content_type} only: send it with the header "
+                f"Content-Type: {link.content_type}. Nothing was saved."
+            },
+            status_code=415,
+        )
     got = await _spool(request, link.max_bytes)
     if isinstance(got, Response):
         LINK_TRANSFERS.labels("u", link.kind, "too_large" if got.status_code == 413 else "refused").inc()
@@ -385,8 +422,9 @@ async def _draft_body(graph: Graph, link: Link, spool: Any, size: int, request: 
     if prepared.errors:
         raise _Rejected(" ".join(prepared.errors))
     draft_id = link.target["d"]
-    d = await _unsent_draft(graph, draft_id, params={"$select": "id,isDraft,body"},
-                            headers={"Prefer": 'outlook.body-content-type="html"'})
+    d = await _unsent_draft(
+        graph, draft_id, params={"$select": "id,isDraft,body"}, headers={"Prefer": 'outlook.body-content-type="html"'}
+    )
     html = insert_new_part((d.get("body") or {}).get("content") or "", prepared.html, _part_id(_mark_value(d)))
     await graph.patch(f"/me/messages/{draft_id}", {"body": {"contentType": "html", "content": html}})
     await _attach_inline(graph, draft_id, prepared.inline_images)
@@ -418,12 +456,23 @@ async def _draft_attachment(graph: Graph, link: Link, spool: Any, size: int, req
         # which recipients' clients open worse.
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
     if size < ATTACH_SINGLE_LIMIT:
-        await graph.post(f"/me/messages/{draft_id}/attachments", {
-            "@odata.type": "#microsoft.graph.fileAttachment", "name": name, "contentType": ctype,
-            "contentBytes": base64.b64encode(spool.read()).decode()})
+        await graph.post(
+            f"/me/messages/{draft_id}/attachments",
+            {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": name,
+                "contentType": ctype,
+                "contentBytes": base64.b64encode(spool.read()).decode(),
+            },
+        )
     else:
-        session = await graph.post(f"/me/messages/{draft_id}/attachments/createUploadSession", {
-            "AttachmentItem": {"attachmentType": "file", "name": name, "size": size, "contentType": ctype}}) or {}
+        session = (
+            await graph.post(
+                f"/me/messages/{draft_id}/attachments/createUploadSession",
+                {"AttachmentItem": {"attachmentType": "file", "name": name, "size": size, "contentType": ctype}},
+            )
+            or {}
+        )
         await graph.upload_session(session["uploadUrl"], _chunks(spool, size, ATTACH_CHUNK), size)
     return {"draft_id": draft_id, "attached": name, "size": size}
 
@@ -435,12 +484,21 @@ async def _drive_upload(graph: Graph, link: Link, spool: Any, size: int, request
     parent = f"/drives/{t['d']}/items/{t['p']}" if t.get("d") else f"/me/drive/items/{t['p']}"
     target = f"{parent}:/{quote(name)}:"
     if size <= DRIVE_SINGLE_LIMIT:
-        resp = await graph.request("PUT", f"{target}/content", params={"@microsoft.graph.conflictBehavior": conflict},
-                                   content=spool.read(), headers={"Content-Type": "application/octet-stream"})
+        resp = await graph.request(
+            "PUT",
+            f"{target}/content",
+            params={"@microsoft.graph.conflictBehavior": conflict},
+            content=spool.read(),
+            headers={"Content-Type": "application/octet-stream"},
+        )
         item = resp.json()
     else:
-        session = await graph.post(f"{target}/createUploadSession", {
-            "item": {"@microsoft.graph.conflictBehavior": conflict, "name": name}}) or {}
+        session = (
+            await graph.post(
+                f"{target}/createUploadSession", {"item": {"@microsoft.graph.conflictBehavior": conflict, "name": name}}
+            )
+            or {}
+        )
         item = await graph.upload_session(session["uploadUrl"], _chunks(spool, size, DRIVE_CHUNK), size)
     return {"id": item.get("id"), "name": item.get("name"), "size": item.get("size"), "web_url": item.get("webUrl")}
 
@@ -451,13 +509,19 @@ async def _note_body(graph: Graph, link: Link, spool: Any, size: int, request: R
         raise _Rejected(" ".join(prepared.errors))
     t = link.target
     if t.get("page"):
-        await graph.patch_note_page(t["page"], [{"target": "body", "action": t.get("a", "append"),
-                                                 "content": prepared.html}])
+        await graph.patch_note_page(
+            t["page"], [{"target": "body", "action": t.get("a", "append"), "content": prepared.html}]
+        )
         return {"page_id": t["page"], "html": prepared.report()}
     title = html_escape(t.get("title") or "Untitled")
     doc = f"<!DOCTYPE html><html><head><title>{title}</title></head><body>{prepared.html}</body></html>"
-    resp = await graph.request("POST", f"/me/onenote/sections/{t['s']}/pages", content=doc.encode(),
-                               headers={"Content-Type": "text/html"}, retry_server_errors=False)
+    resp = await graph.request(
+        "POST",
+        f"/me/onenote/sections/{t['s']}/pages",
+        content=doc.encode(),
+        headers={"Content-Type": "text/html"},
+        retry_server_errors=False,
+    )
     page = resp.json()
     return {"page_id": page.get("id"), "html": prepared.report()}
 
@@ -471,7 +535,9 @@ _UPLOADERS = {
 
 
 def links_app() -> Starlette:
-    return Starlette(routes=[
-        Route("/d/{value:path}", download, methods=["GET", "HEAD"]),
-        Route("/u/{value:path}", upload, methods=["PUT"]),
-    ])
+    return Starlette(
+        routes=[
+            Route("/d/{value:path}", download, methods=["GET", "HEAD"]),
+            Route("/u/{value:path}", upload, methods=["PUT"]),
+        ]
+    )

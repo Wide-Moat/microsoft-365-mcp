@@ -25,8 +25,7 @@ class LinksFull(Exception):
 
 
 class LinkStore:
-    def __init__(self, max_entries: int = 5_000, per_owner: int = 300,
-                 clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, max_entries: int = 5_000, per_owner: int = 300, clock: Callable[[], float] = time.time) -> None:
         self._max = max_entries
         self._per_owner = per_owner  # one person looping a tool must not fill the store for everyone
         self._clock = clock

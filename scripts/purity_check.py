@@ -14,6 +14,7 @@ Looks at every file git tracks and reports, with file and line:
 
 Exit codes: 0 clean, 1 findings, 2 nothing was scanned (a check that read no file cannot pass).
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -22,9 +23,23 @@ import subprocess
 import sys
 from pathlib import Path
 
-PLACEHOLDER_TENANTS = ("contoso", "fabrikam", "northwind", "northwindtraders", "adatum", "tailspintoys",
-                       "wingtiptoys", "woodgrove", "woodgrovebank", "litware", "x", "tenant", "yourtenant",
-                       "your-tenant", "example")
+PLACEHOLDER_TENANTS = (
+    "contoso",
+    "fabrikam",
+    "northwind",
+    "northwindtraders",
+    "adatum",
+    "tailspintoys",
+    "wingtiptoys",
+    "woodgrove",
+    "woodgrovebank",
+    "litware",
+    "x",
+    "tenant",
+    "yourtenant",
+    "your-tenant",
+    "example",
+)
 EMAIL = re.compile(r"(?<![\w.%+-])[\w.%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 TENANT = re.compile(r"(?<![\w.*<{-])([A-Za-z0-9][A-Za-z0-9-]*)\.(?:sharepoint|onmicrosoft)\.com", re.I)
 GUID = re.compile(r"(?<![0-9A-Fa-f-])[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}(?![0-9A-Fa-f-])")
@@ -42,7 +57,12 @@ def _email_ok(domain: str) -> bool:
     d = domain.lower()
     if d in ("thread.v2", "thread.tacv2", "unq.gbl.spaces"):
         return True  # a Teams conversation id (19:...@thread.v2), not an address
-    if d.endswith((".test", ".invalid", ".localhost", ".example")) or d in ("localhost", "example.com", "example.org", "example.net"):
+    if d.endswith((".test", ".invalid", ".localhost", ".example")) or d in (
+        "localhost",
+        "example.com",
+        "example.org",
+        "example.net",
+    ):
         return True
     if d.endswith((".example.com", ".example.org", ".example.net")):
         return True
@@ -55,8 +75,15 @@ def _ip_ok(text: str) -> bool:
         ip = ipaddress.ip_address(text)
     except ValueError:
         return True  # 999.1.1.1 is a version string, not an address
-    return (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast
-            or str(ip) == "255.255.255.255" or any(ip in n for n in DOC_NETS))
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_unspecified
+        or ip.is_multicast
+        or str(ip) == "255.255.255.255"
+        or any(ip in n for n in DOC_NETS)
+    )
 
 
 def _guid_ok(guid: str) -> bool:

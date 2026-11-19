@@ -22,40 +22,61 @@ MESSAGES: dict[str, str] = {
     "forbidden": "Microsoft 365 does not let you do this here: you lack access to this item, or the organisation's policy blocks it.",
     "not_found": "It does not exist, or it is not shared with you. Check the id, or find it again with the tool that lists it.",
     "throttled": "Microsoft is limiting requests right now. Try again in {seconds}.",
-    "failed": ("Microsoft 365 refused the request, and nothing was changed. Check the values given, or do it in "
-               "the Microsoft 365 app. Reference: {request_id}."),
-    "uncertain": ("Microsoft 365 failed while handling this, so it may or may not have happened. Check before "
-                  "trying again. Reference: {request_id}."),
-    "failed_read": ("Microsoft 365 failed while reading this; nothing was changed. Try again in a moment. "
-                    "Reference: {request_id}."),
-    "no_onedrive": ("Your OneDrive is not set up yet, or your licence does not include it. Open OneDrive once in "
-                    "the browser, or ask your Microsoft 365 administrator to assign a licence; reconnecting will "
-                    "not help. Nothing was changed."),
-    "service_unavailable": ("Microsoft 365 turned this service down for your account although the sign-in is valid: "
-                            "your OneDrive or OneNote may not be set up yet, or your licence does not include it. Open "
-                            "it once in the browser, or ask your administrator; reconnecting will not help. Nothing "
-                            "was changed."),
-    "unreachable": ("Microsoft Teams cannot reach that person: they are outside the organisation or not in its "
-                    "directory. Write to them by mail instead. Nothing was sent."),
+    "failed": (
+        "Microsoft 365 refused the request, and nothing was changed. Check the values given, or do it in "
+        "the Microsoft 365 app. Reference: {request_id}."
+    ),
+    "uncertain": (
+        "Microsoft 365 failed while handling this, so it may or may not have happened. Check before "
+        "trying again. Reference: {request_id}."
+    ),
+    "failed_read": (
+        "Microsoft 365 failed while reading this; nothing was changed. Try again in a moment. Reference: {request_id}."
+    ),
+    "no_onedrive": (
+        "Your OneDrive is not set up yet, or your licence does not include it. Open OneDrive once in "
+        "the browser, or ask your Microsoft 365 administrator to assign a licence; reconnecting will "
+        "not help. Nothing was changed."
+    ),
+    "service_unavailable": (
+        "Microsoft 365 turned this service down for your account although the sign-in is valid: "
+        "your OneDrive or OneNote may not be set up yet, or your licence does not include it. Open "
+        "it once in the browser, or ask your administrator; reconnecting will not help. Nothing "
+        "was changed."
+    ),
+    "unreachable": (
+        "Microsoft Teams cannot reach that person: they are outside the organisation or not in its "
+        "directory. Write to them by mail instead. Nothing was sent."
+    ),
     "conflict": "It changed since it was read. Read it again, then retry.",
     "too_large": "It is too large: {size} against a limit of {limit}.",
     "exists": "An item with that name already exists: {name}.",
-    "ambiguous": "More than one {kind} matches \"{query}\". Ask which one is meant: {candidates}.",
-    "unresolved": "No {kind} matches \"{query}\". {where}",
-    "confirm": ("This is seen by other people at once. Ask the person to confirm{names}, then call again with "
-                "user_confirmed=true. {outcome}"),
-    "confirm_outside": ("This is seen by other people at once, and some recipients are outside the organisation "
-                        "({domains}). Tell the person, ask them to confirm, then call again with user_confirmed=true. "
-                        "Nothing was sent."),
+    "ambiguous": 'More than one {kind} matches "{query}". Ask which one is meant: {candidates}.',
+    "unresolved": 'No {kind} matches "{query}". {where}',
+    "confirm": (
+        "This is seen by other people at once. Ask the person to confirm{names}, then call again with "
+        "user_confirmed=true. {outcome}"
+    ),
+    "confirm_outside": (
+        "This is seen by other people at once, and some recipients are outside the organisation "
+        "({domains}). Tell the person, ask them to confirm, then call again with user_confirmed=true. "
+        "Nothing was sent."
+    ),
     "too_many_recipients": "At most {limit} recipients per action; this has {count}.",
-    "distribution_list": ("{address} is not a person in the organisation's directory: it is a group or distribution "
-                          "list, an alias, or an address that does not exist. Name the people, or use a person's "
-                          "main address; bulk sending is not supported. Nothing was sent."),
-    "outside_domains": ("This server only reaches people at the organisation's allowed domains, and these are "
-                        "outside them: {domains}. Remove those recipients. Nothing was sent."),
-    "rate": ("Too many sends in a short time. The allowance is the person's: 10 at once, then one every 6 seconds, "
-             "shared by mail, Teams, invitations and sharing in every chat they have open. Wait {seconds}. If it "
-             "is refused again, another chat is sending too, so wait longer. {then}"),
+    "distribution_list": (
+        "{address} is not a person in the organisation's directory: it is a group or distribution "
+        "list, an alias, or an address that does not exist. Name the people, or use a person's "
+        "main address; bulk sending is not supported. Nothing was sent."
+    ),
+    "outside_domains": (
+        "This server only reaches people at the organisation's allowed domains, and these are "
+        "outside them: {domains}. Remove those recipients. Nothing was sent."
+    ),
+    "rate": (
+        "Too many sends in a short time. The allowance is the person's: 10 at once, then one every 6 seconds, "
+        "shared by mail, Teams, invitations and sharing in every chat they have open. Wait {seconds}. If it "
+        "is refused again, another chat is sending too, so wait longer. {then}"
+    ),
     "invalid": "{reason}",
     "not_owner": "Only the organiser can change this meeting. Respond to it instead.",
     "not_own_draft": "Only drafts created by the assistant can be changed or sent here. This draft was written by the person.",

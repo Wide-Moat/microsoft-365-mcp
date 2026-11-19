@@ -11,6 +11,7 @@ from m365_mcp.core.errors import invalid
 
 def require(user_confirmed: bool | None, what: str) -> None:
     if user_confirmed is not True:
-        raise invalid(f"{what} cannot be undone from here. Ask the person to confirm, then call again with "
-                      "user_confirmed=true. Nothing was changed.")
-
+        raise invalid(
+            f"{what} cannot be undone from here. Ask the person to confirm, then call again with "
+            "user_confirmed=true. Nothing was changed."
+        )

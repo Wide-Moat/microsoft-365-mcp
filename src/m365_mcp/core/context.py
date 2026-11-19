@@ -105,16 +105,31 @@ class Call:
     def cursor_in(self, cursor: str | None) -> dict | None:
         return self.rt.cursors.read(self.tool, self.key, cursor) if cursor else None
 
-    def link(self, *, op: str, kind: str, target: dict[str, Any], max_bytes: int | None = None,
-             content_type: str | None = None) -> str:
+    def link(
+        self,
+        *,
+        op: str,
+        kind: str,
+        target: dict[str, Any],
+        max_bytes: int | None = None,
+        content_type: str | None = None,
+    ) -> str:
         signer = self.rt.signer
         if signer is None:
             raise M365Error("links_unavailable")
         ttl = LINK_TTL_DOWNLOAD if op == "d" else LINK_TTL_UPLOAD
         try:
-            value = signer.issue(op=op, kind=kind, target=target, person=self.key, token=self.person.token,
-                                 token_expires=self.person.expires, ttl=ttl, max_bytes=max_bytes,
-                                 content_type=content_type)
+            value = signer.issue(
+                op=op,
+                kind=kind,
+                target=target,
+                person=self.key,
+                token=self.person.token,
+                token_expires=self.person.expires,
+                ttl=ttl,
+                max_bytes=max_bytes,
+                content_type=content_type,
+            )
         except LinksFull:
             raise M365Error("links_full") from None
         return f"{self.rt.settings.links_base_url}/{op}/{value}"
@@ -142,8 +157,12 @@ async def learn_zone(graph: Graph) -> None:
     """Map Outlook's Windows zone names to IANA ones by asking Graph for both lists. A zone that still
     cannot be named is shown in UTC, with the offset saying so, rather than shifted silently."""
     try:
-        win = await graph.get("/me/outlook/supportedTimeZones(TimeZoneStandard=microsoft.graph.timeZoneStandard'Windows')")
-        iana = await graph.get("/me/outlook/supportedTimeZones(TimeZoneStandard=microsoft.graph.timeZoneStandard'Iana')")
+        win = await graph.get(
+            "/me/outlook/supportedTimeZones(TimeZoneStandard=microsoft.graph.timeZoneStandard'Windows')"
+        )
+        iana = await graph.get(
+            "/me/outlook/supportedTimeZones(TimeZoneStandard=microsoft.graph.timeZoneStandard'Iana')"
+        )
     except GraphError:
         return
     by_display = {z.get("displayName"): z.get("alias") for z in iana.get("value", [])}

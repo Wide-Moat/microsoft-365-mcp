@@ -16,14 +16,22 @@ REFILL_PER_SECOND = 10 / 60
 
 # What a refusal by the rate says happens next, by what was asked (a refused send left its draft,
 # and an agent repeating save_draft -> send_draft made a new draft each time).
-_RATE_THEN = {"mail": "Nothing was sent and the draft is kept: call send_draft again with the same id later, and do "
-                      "not save a new draft.",
-              "share": "Nothing was shared.", "event": "Nothing was sent; nothing was changed."}
+_RATE_THEN = {
+    "mail": "Nothing was sent and the draft is kept: call send_draft again with the same id later, and do "
+    "not save a new draft.",
+    "share": "Nothing was shared.",
+    "event": "Nothing was sent; nothing was changed.",
+}
 
 # What the confirmation refusal says did not happen, by what was asked; the default is a message.
-_UNDONE = {"assignment": "Nothing was saved.", "chat_members": "Nothing was changed.", "share": "Nothing was shared.",
-           "automatic_reply": "Nothing was changed.", "booking": "Nothing was booked or changed.",
-           "event_response": "Nothing was answered."}
+_UNDONE = {
+    "assignment": "Nothing was saved.",
+    "chat_members": "Nothing was changed.",
+    "share": "Nothing was shared.",
+    "automatic_reply": "Nothing was changed.",
+    "booking": "Nothing was booked or changed.",
+    "event_response": "Nothing was answered.",
+}
 
 
 @dataclass
@@ -50,9 +58,18 @@ class Guard:
         b.tokens -= 1
         return int(b.tokens)
 
-    def check(self, person: str, *, kind: str, user_confirmed: bool | None, recipients: int = 0,
-              group_addresses: list[str] | None = None, needs_confirmation: bool = True,
-              addresses: list[str] | None = None, allowed_domains: frozenset[str] = frozenset()) -> dict:
+    def check(
+        self,
+        person: str,
+        *,
+        kind: str,
+        user_confirmed: bool | None,
+        recipients: int = 0,
+        group_addresses: list[str] | None = None,
+        needs_confirmation: bool = True,
+        addresses: list[str] | None = None,
+        allowed_domains: frozenset[str] = frozenset(),
+    ) -> dict:
         """Call before the Graph request. Returns the receipt the tool includes in its result."""
         if needs_confirmation and user_confirmed is not True:
             raise M365Error("confirm", outcome=_UNDONE.get(kind, "Nothing was sent."))

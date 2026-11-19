@@ -6,15 +6,14 @@ assert exactly what reached Graph — including that nothing did.
 
 from __future__ import annotations
 
-import base64
 import json
 import re
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 import pytest
+from helpers import ENC, LINKS, SIGN, FakeGraph, make_token  # noqa: F401
 
 from m365_mcp.config import Settings
 from m365_mcp.core.context import Runtime, configure
@@ -23,8 +22,6 @@ from m365_mcp.core.guard import Guard
 from m365_mcp.identity import current_areas, current_token
 from m365_mcp.links.store import LinkStore
 from m365_mcp.links.tokens import LinkSigner
-
-from helpers import ENC, LINKS, SIGN, FakeGraph, make_token  # noqa: F401
 
 
 async def _no_sleep(_s: float) -> None:
@@ -58,9 +55,14 @@ def _everyone_is_a_user(seen) -> httpx.Response:
 @pytest.fixture
 def settings() -> Settings:
     from m365_mcp.registry import AREAS
-    return Settings(areas=frozenset(a for a, on in AREAS.items() if on) | {"bookings"},
-                    switches=frozenset({"teams_channels", "transcripts", "rooms", "chat_admin"}),
-                    sign_keys=(SIGN,), enc_keys=(ENC,), links_base_url=LINKS)
+
+    return Settings(
+        areas=frozenset(a for a, on in AREAS.items() if on) | {"bookings"},
+        switches=frozenset({"teams_channels", "transcripts", "rooms", "chat_admin"}),
+        sign_keys=(SIGN,),
+        enc_keys=(ENC,),
+        links_base_url=LINKS,
+    )
 
 
 @pytest.fixture
@@ -70,8 +72,14 @@ def guard() -> Guard:
 
 @pytest.fixture
 def rt(graph: FakeGraph, settings: Settings, guard: Guard) -> Runtime:
-    r = Runtime(settings=settings, signer=LinkSigner((SIGN,), (ENC,), LinkStore()), cursors=Cursors(SIGN), guard=guard,
-                transport=httpx.MockTransport(graph), sleep=_no_sleep)
+    r = Runtime(
+        settings=settings,
+        signer=LinkSigner((SIGN,), (ENC,), LinkStore()),
+        cursors=Cursors(SIGN),
+        guard=guard,
+        transport=httpx.MockTransport(graph),
+        sleep=_no_sleep,
+    )
     configure(r)
     return r
 
@@ -89,6 +97,7 @@ def token(rt: Runtime) -> str:
 @pytest.fixture
 def server(rt: Runtime, settings: Settings):
     from m365_mcp.server import M365Server
+
     return M365Server(settings)
 
 

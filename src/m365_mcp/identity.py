@@ -54,8 +54,7 @@ def _client(claims: dict) -> str:
     return value.strip().lower() if isinstance(value, str) else ""
 
 
-def person_from_token(token: str | None, *, now: float | None = None,
-                      clients: frozenset[str] = frozenset()) -> Person:
+def person_from_token(token: str | None, *, now: float | None = None, clients: frozenset[str] = frozenset()) -> Person:
     """Shape, audience, expiry and, when the installation names its clients, the client the token was
     issued to. The signature is Graph's to check; a forged token gets a 401 there. A Graph token
     minted for some other application is still a valid Graph token, so only the client check keeps

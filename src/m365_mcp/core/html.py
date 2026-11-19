@@ -24,13 +24,82 @@ MAX_HTML_BYTES = 2 * 1024 * 1024
 MAX_INLINE_IMAGE_BYTES = 3 * 1024 * 1024
 
 _TAGS = {
-    "a", "abbr", "b", "blockquote", "br", "caption", "center", "code", "col", "colgroup", "dd", "del",
-    "div", "dl", "dt", "em", "font", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "ins", "li",
-    "ol", "p", "pre", "q", "s", "small", "span", "strike", "strong", "sub", "sup", "table", "tbody",
-    "td", "tfoot", "th", "thead", "tr", "u", "ul",
+    "a",
+    "abbr",
+    "b",
+    "blockquote",
+    "br",
+    "caption",
+    "center",
+    "code",
+    "col",
+    "colgroup",
+    "dd",
+    "del",
+    "div",
+    "dl",
+    "dt",
+    "em",
+    "font",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "i",
+    "img",
+    "ins",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "q",
+    "s",
+    "small",
+    "span",
+    "strike",
+    "strong",
+    "sub",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+    "u",
+    "ul",
 }
-_TEAMS_TAGS = {"a", "b", "blockquote", "br", "code", "div", "em", "h1", "h2", "h3", "hr", "i", "img",
-               "li", "ol", "p", "pre", "s", "span", "strike", "strong", "u", "ul", "at", "attachment"}
+_TEAMS_TAGS = {
+    "a",
+    "b",
+    "blockquote",
+    "br",
+    "code",
+    "div",
+    "em",
+    "h1",
+    "h2",
+    "h3",
+    "hr",
+    "i",
+    "img",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "s",
+    "span",
+    "strike",
+    "strong",
+    "u",
+    "ul",
+    "at",
+    "attachment",
+}
 _ATTRS = {
     # `hidden` passes the allowlist only to be turned into display:none after it (_HIDDEN_ATTR).
     "*": {"style", "align", "valign", "width", "height", "bgcolor", "dir", "lang", "title", "hidden"},
@@ -46,8 +115,26 @@ _ATTRS = {
     "attachment": {"id"},
 }
 _SCHEMES = {"http", "https", "mailto", "tel", "cid"}
-_FORBIDDEN_TAGS = {"script", "iframe", "object", "embed", "form", "input", "button", "textarea", "select",
-                   "link", "meta", "base", "frame", "frameset", "applet", "svg", "math", "style"}
+_FORBIDDEN_TAGS = {
+    "script",
+    "iframe",
+    "object",
+    "embed",
+    "form",
+    "input",
+    "button",
+    "textarea",
+    "select",
+    "link",
+    "meta",
+    "base",
+    "frame",
+    "frameset",
+    "applet",
+    "svg",
+    "math",
+    "style",
+}
 
 _WEB_FONT = re.compile(r"@font-face|@import\b|<link\b[^>]*\bstylesheet\b|fonts\.googleapis\.com", re.I)
 _DATA_IMG = re.compile(r"^data:(image/(?:png|jpeg|gif|webp|bmp));base64,([A-Za-z0-9+/=\s]+)$", re.I)
@@ -136,7 +223,9 @@ class _Scan(HTMLParser):
 
 
 # nh3 serialises every attribute as name="value", so a start tag holding `hidden` is regular here.
-_HIDDEN_TAG = re.compile(r'<([a-z][a-z0-9]*)((?:\s+[^\s=>]+="[^"]*")*?)\s+hidden="[^"]*"((?:\s+[^\s=>]+="[^"]*")*)\s*(/?)>')
+_HIDDEN_TAG = re.compile(
+    r'<([a-z][a-z0-9]*)((?:\s+[^\s=>]+="[^"]*")*?)\s+hidden="[^"]*"((?:\s+[^\s=>]+="[^"]*")*)\s*(/?)>'
+)
 _STYLE_ATTR = re.compile(r'\sstyle="([^"]*)"')
 
 
@@ -167,9 +256,11 @@ def _hidden_to_style(html: str) -> tuple[str, int]:
     reached the recipient visible. display:none is honoured by both. The element's own style is
     replaced whole: a display of its own, an escaped one, a comment or an open string could each
     defeat a display:none appended to it, and an element not shown needs no style."""
+
     def one(m: re.Match[str]) -> str:
         attrs = _STYLE_ATTR.sub("", m.group(2) + m.group(3))
         return f'<{m.group(1)}{attrs} style="display:none"{m.group(4)}>'
+
     return _HIDDEN_TAG.subn(one, html)
 
 
@@ -246,11 +337,15 @@ def prepare_outgoing(raw: bytes | str, *, teams: bool = False, max_bytes: int = 
     )
     out.sanitized.extend(f"removed {what}" + (f" ×{n}" if n > 1 else "") for what, n in sorted(before.removed.items()))
     if expressions:
-        out.sanitized.append("removed a style with a CSS expression()" + (f" ×{expressions}" if expressions > 1 else ""))
+        out.sanitized.append(
+            "removed a style with a CSS expression()" + (f" ×{expressions}" if expressions > 1 else "")
+        )
     clean, hidden = _hidden_to_style(clean)
     if hidden:
-        out.sanitized.append("the hidden attribute written as display:none, which Outlook honours"
-                             + (f" ×{hidden}" if hidden > 1 else ""))
+        out.sanitized.append(
+            "the hidden attribute written as display:none, which Outlook honours"
+            + (f" ×{hidden}" if hidden > 1 else "")
+        )
 
     after = _Scan()
     after.feed(clean)
@@ -264,8 +359,12 @@ def prepare_outgoing(raw: bytes | str, *, teams: bool = False, max_bytes: int = 
             out.errors.append(f"Links and images must be absolute https URLs: {u[:200]}")
     style = " ".join(after.styles).lower()
     for needle, why in (
-        ("display:flex", "flex layout"), ("display: flex", "flex layout"), ("display:grid", "grid layout"),
-        ("display: grid", "grid layout"), ("position:", "CSS positioning"), ("background-image", "background images"),
+        ("display:flex", "flex layout"),
+        ("display: flex", "flex layout"),
+        ("display:grid", "grid layout"),
+        ("display: grid", "grid layout"),
+        ("position:", "CSS positioning"),
+        ("background-image", "background images"),
     ):
         if needle in style and f"{why} does not render in Outlook for Windows" not in out.warnings:
             out.warnings.append(f"{why} does not render in Outlook for Windows")
@@ -275,8 +374,10 @@ def prepare_outgoing(raw: bytes | str, *, teams: bool = False, max_bytes: int = 
     attached = {i.content_id for i in out.inline_images}
     for src in dict.fromkeys(after.img_srcs):
         if src.strip().startswith("cid:") and src.strip()[4:] not in attached:
-            out.warnings.append(f"{src.strip()[:80]} names no image in this letter: it shows broken unless a file "
-                                "is attached with that id")
+            out.warnings.append(
+                f"{src.strip()[:80]} names no image in this letter: it shows broken unless a file "
+                "is attached with that id"
+            )
     if after.imgs_without_alt:
         out.warnings.append(f"{after.imgs_without_alt} image(s) without alt text")
     # The width attribute too: Outlook honours width="1000" as surely as a style.
@@ -297,8 +398,32 @@ def text_to_html(text: str) -> str:
 # Incoming: HTML to text, without what a reader would not see.
 
 _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
-_BLOCK = {"p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "hr",
-          "table", "ul", "ol", "dl", "dt", "dd", "section", "article", "header", "footer"}
+_BLOCK = {
+    "p",
+    "div",
+    "br",
+    "tr",
+    "li",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "pre",
+    "hr",
+    "table",
+    "ul",
+    "ol",
+    "dl",
+    "dt",
+    "dd",
+    "section",
+    "article",
+    "header",
+    "footer",
+}
 _DROP = {"script", "style", "head", "title", "noscript", "template", "svg", "math", "object", "iframe"}
 
 
@@ -336,7 +461,9 @@ def _hidden(tag: str, a: dict[str, str], inherited_bg: str | None) -> bool:
         return True
     if s.get("mso-hide") == "all":  # Outlook's own switch for content it does not show
         return True
-    if s.get("position") in ("absolute", "fixed") and any(_far_off(s.get(k, "")) for k in ("left", "top", "right", "bottom")):
+    if s.get("position") in ("absolute", "fixed") and any(
+        _far_off(s.get(k, "")) for k in ("left", "top", "right", "bottom")
+    ):
         return True
     if _clipped(s):
         return True
@@ -365,8 +492,20 @@ def _indent(a: dict[str, str]) -> bool | None:
 
 
 # A display that makes any element a block container, which text-indent then applies to.
-_BLOCK_DISPLAY = {"block", "inline-block", "list-item", "flex", "inline-flex", "grid", "inline-grid", "table",
-                  "inline-table", "table-cell", "table-caption", "flow-root"}
+_BLOCK_DISPLAY = {
+    "block",
+    "inline-block",
+    "list-item",
+    "flex",
+    "inline-flex",
+    "grid",
+    "inline-grid",
+    "table",
+    "inline-table",
+    "table-cell",
+    "table-caption",
+    "flow-root",
+}
 
 
 def _transparent(c: str) -> bool:
@@ -420,11 +559,35 @@ def _is_zero(v: str) -> bool:
 # real target is in `url`; the rest (`data`, `sdata`) identifies the recipient. Government clouds
 # use the office365.us twin.
 _SAFE_LINKS = re.compile(r"^[a-z0-9-]+\.safelinks\.protection\.(outlook\.com|office365\.us)$")
-_TRACKING = frozenset({
-    "fbclid", "gclid", "dclid", "gbraid", "wbraid", "msclkid", "yclid", "twclid", "ttclid", "igshid",
-    "mc_eid", "mc_cid", "_hsenc", "_hsmi", "__hstc", "__hssc", "__hsfp", "hsctatracking", "mkt_tok",
-    "li_fat_id", "oly_anon_id", "oly_enc_id", "vero_id", "vero_conv", "_openstat",
-})
+_TRACKING = frozenset(
+    {
+        "fbclid",
+        "gclid",
+        "dclid",
+        "gbraid",
+        "wbraid",
+        "msclkid",
+        "yclid",
+        "twclid",
+        "ttclid",
+        "igshid",
+        "mc_eid",
+        "mc_cid",
+        "_hsenc",
+        "_hsmi",
+        "__hstc",
+        "__hssc",
+        "__hsfp",
+        "hsctatracking",
+        "mkt_tok",
+        "li_fat_id",
+        "oly_anon_id",
+        "oly_enc_id",
+        "vero_id",
+        "vero_conv",
+        "_openstat",
+    }
+)
 _BARE_URL = re.compile(r"https?://[^\s<>\"']+")
 
 
@@ -468,6 +631,7 @@ def _clean_bare_urls(text: str) -> str:
             url, tail = url[:-1], url[-1] + tail
         cleaned = clean_url(url)
         return (url if cleaned is None and not _wrapped(url) else cleaned or "") + tail
+
     return _BARE_URL.sub(one, text)
 
 
@@ -522,7 +686,7 @@ class _ToText(HTMLParser):
                 self.first_line = None  # the pushed-off line ends here; what follows is seen
             if tag == "img":
                 w, h = a.get("width", ""), a.get("height", "")
-                tiny = (w.strip("px ") in ("0", "1") and h.strip("px ") in ("0", "1"))
+                tiny = w.strip("px ") in ("0", "1") and h.strip("px ") in ("0", "1")
                 if not tiny and a.get("alt", "").strip():
                     self.out.append(f"[image: {a['alt'].strip()}]")
             elif tag in ("br", "hr"):
@@ -617,8 +781,12 @@ class _ToText(HTMLParser):
         # The newline right after <pre> opens the block and ends no line; once the pushed-off line
         # holds text, the next newline ends it, in whichever callback it comes.
         lead = data if self.line_started else data.lstrip("\n")
-        if self.first_line is not None and not self.hidden and "\n" in lead \
-                and any(t == "pre" for t, _, _ in self.stack):
+        if (
+            self.first_line is not None
+            and not self.hidden
+            and "\n" in lead
+            and any(t == "pre" for t, _, _ in self.stack)
+        ):
             # In preformatted text a newline ends the pushed-off line; what follows is seen, in this
             # text or in the elements after it.
             data = lead.split("\n", 1)[1]

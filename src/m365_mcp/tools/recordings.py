@@ -45,8 +45,10 @@ def transcript_refusal(e: GraphError, *, beside_recording: bool = False) -> str:
     err = to_person_error(e)
     text = err.text
     if err.key == "forbidden":
-        text = ("Microsoft 365 refused to list this meeting's transcripts: transcription may not be enabled for it, "
-                "or only the organiser may read them.")
+        text = (
+            "Microsoft 365 refused to list this meeting's transcripts: transcription may not be enabled for it, "
+            "or only the organiser may read them."
+        )
     # Beside a recording, any transcript refusal read as if the recording were refused too.
     return text + " The recording is not affected." if beside_recording else text
 
@@ -66,8 +68,11 @@ async def recording_view(c: Call, e: dict[str, Any]) -> dict[str, Any]:
     subject, organizer_is_me = e.get("subject") or "", e.get("isOrganizer") is True
     meeting = await meeting_for(c, join_url)
     if not meeting:
-        return {"recording_available": False, "recording_note": "Teams has no record of this meeting, so there is no "
-                "recording. Recordings exist only for meetings created from a calendar invitation."}
+        return {
+            "recording_available": False,
+            "recording_note": "Teams has no record of this meeting, so there is no "
+            "recording. Recordings exist only for meetings created from a calendar invitation.",
+        }
     mid = meeting["id"]
     subject = subject or meeting.get("subject") or ""
     out: dict[str, Any] = {}
@@ -77,14 +82,18 @@ async def recording_view(c: Call, e: dict[str, Any]) -> dict[str, Any]:
         out["recordings"] = recordings
         notes.append(SIZE_NOTE)
         if not organizer_is_me:
-            notes.append("Only the organiser can download recordings; if a link fails, watch the meeting "
-                         "recording in Teams from the meeting link.")
+            notes.append(
+                "Only the organiser can download recordings; if a link fails, watch the meeting "
+                "recording in Teams from the meeting link."
+            )
     if transcripts:
         out["transcripts"] = transcripts
     out["recording_available"] = bool(recordings or transcripts)
     if not out["recording_available"] and not notes:
-        notes.append("There is no recording or transcript yet. They appear some minutes after the meeting "
-                     "ends, and only if it was recorded or transcribed.")
+        notes.append(
+            "There is no recording or transcript yet. They appear some minutes after the meeting "
+            "ends, and only if it was recorded or transcribed."
+        )
     if notes:
         out["recording_note"] = " ".join(notes)
     return out
@@ -96,8 +105,10 @@ async def _recordings(c: Call, mid: str, subject: str, out: dict[str, Any], note
         items = (await c.graph.get(f"/me/onlineMeetings/{mid}/recordings")).get("value") or []
     except GraphError as e:
         if e.status == 403 and not e.missing_scope:
-            notes.append("This recording can be downloaded only by the meeting's organiser. Watch it in Teams "
-                         "from the meeting link.")
+            notes.append(
+                "This recording can be downloaded only by the meeting's organiser. Watch it in Teams "
+                "from the meeting link."
+            )
             return []
         if _expired(e):
             notes.append("The recording has expired and was removed under the organisation's retention policy.")
@@ -107,8 +118,15 @@ async def _recordings(c: Call, mid: str, subject: str, out: dict[str, Any], note
     for r in items:
         name = _file_name(subject, "mp4")
         url = c.link(op="d", kind="recording", target={"m": mid, "r": r["id"], "n": name})
-        found.append(compact({"started": from_graph(r.get("createdDateTime"), c.tz), "minutes": _minutes(r),
-                              "download": _curl(name, url)}))
+        found.append(
+            compact(
+                {
+                    "started": from_graph(r.get("createdDateTime"), c.tz),
+                    "minutes": _minutes(r),
+                    "download": _curl(name, url),
+                }
+            )
+        )
     return found
 
 

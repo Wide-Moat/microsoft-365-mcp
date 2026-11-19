@@ -18,7 +18,7 @@ from pydantic import Field
 from m365_mcp.core.context import Call, call
 from m365_mcp.core.errors import M365Error, invalid
 from m365_mcp.core.guard import shown as allowance
-from m365_mcp.core.html import content_block, content_line, defang, html_to_text, prepare_outgoing, text_to_html
+from m365_mcp.core.html import content_block, content_line, html_to_text, prepare_outgoing, text_to_html
 from m365_mcp.core.project import clamp_limit, compact, page_result
 from m365_mcp.core.resolve import Who, groups_among, one, person, recipients
 from m365_mcp.core.time import from_graph, parse
@@ -65,7 +65,9 @@ def _title(chat: dict[str, Any], me_id: str) -> str:
     if chat.get("topic"):
         # Any member can name the chat: the name is their text, not ours.
         return content_line("a member of the chat", chat["topic"])
-    names = [m.get("displayName") for m in chat.get("members") or [] if m.get("userId") != me_id and m.get("displayName")]
+    names = [
+        m.get("displayName") for m in chat.get("members") or [] if m.get("userId") != me_id and m.get("displayName")
+    ]
     return ", ".join(names[:3]) or "(chat)"
 
 
@@ -81,23 +83,28 @@ def _message(m: dict[str, Any], c: Call, me_id: str) -> dict[str, Any] | None:
     raw = body.get("content") or ""
     text = html_to_text(raw) if body.get("contentType") == "html" else raw.strip()
     author = _author(m)
-    files = [compact({"name": a.get("name"), "url": a.get("contentUrl")})
-             for a in m.get("attachments") or [] if a.get("contentType") == "reference"]
-    return compact({
-        "id": m.get("id"),
-        "from": author,
-        "mine": ((m.get("from") or {}).get("user") or {}).get("id") == me_id,
-        "time": from_graph(m.get("createdDateTime"), c.tz),
-        "text": content_block(author, text) if text else None,
-        "mentions": [x.get("mentionText") for x in m.get("mentions") or [] if x.get("mentionText")],
-        "files": files,
-        "inline_images": len(re.findall(r"hostedContents", raw)),
-        "reactions": len(m.get("reactions") or []),
-        "reply_to": m.get("replyToId"),
-        "edited": bool(m.get("lastEditedDateTime")),
-        # Soft-deleted replies stay in the expansion; only the ones still there are counted.
-        "replies": len([r for r in m.get("replies") or [] if not r.get("deletedDateTime")]),
-    })
+    files = [
+        compact({"name": a.get("name"), "url": a.get("contentUrl")})
+        for a in m.get("attachments") or []
+        if a.get("contentType") == "reference"
+    ]
+    return compact(
+        {
+            "id": m.get("id"),
+            "from": author,
+            "mine": ((m.get("from") or {}).get("user") or {}).get("id") == me_id,
+            "time": from_graph(m.get("createdDateTime"), c.tz),
+            "text": content_block(author, text) if text else None,
+            "mentions": [x.get("mentionText") for x in m.get("mentions") or [] if x.get("mentionText")],
+            "files": files,
+            "inline_images": len(re.findall(r"hostedContents", raw)),
+            "reactions": len(m.get("reactions") or []),
+            "reply_to": m.get("replyToId"),
+            "edited": bool(m.get("lastEditedDateTime")),
+            # Soft-deleted replies stay in the expansion; only the ones still there are counted.
+            "replies": len([r for r in m.get("replies") or [] if not r.get("deletedDateTime")]),
+        }
+    )
 
 
 def _shown(m: dict[str, Any], c: Call, me: dict[str, Any], attachments_only: bool) -> bool:
@@ -142,11 +149,13 @@ async def _still_more(c: Call, next_link: str | None, shown: Any = None) -> str 
 
 # -- channels, shared by several tools -----------------------------------------------------
 
+
 async def _channel(c: Call, team_q: str, channel_q: str) -> tuple[dict[str, Any], dict[str, Any]]:
     teams = (await c.graph.get("/me/joinedTeams", params={"$select": "id,displayName"})).get("value", [])
     team = one(team_q, teams, kind="team", name=lambda t: t["displayName"])
-    chans = (await c.graph.get(f"/teams/{team['id']}/channels",
-                               params={"$select": "id,displayName,membershipType"})).get("value", [])
+    chans = (
+        await c.graph.get(f"/teams/{team['id']}/channels", params={"$select": "id,displayName,membershipType"})
+    ).get("value", [])
     return team, one(channel_q, chans, kind="channel", name=lambda x: x["displayName"])
 
 
@@ -159,14 +168,26 @@ async def _channel_ref(c: Call, ref: str) -> tuple[dict[str, Any], dict[str, Any
 
 # -- reading -------------------------------------------------------------------------------
 
+
 async def _search_chat_messages(c: Call, query: str, start: int, size: int) -> dict[str, Any]:
     # Microsoft Search is a POST that reads; it lives outside the read-only tool for that reason.
-    body = await c.graph.post("/search/query", {"requests": [{
-        "entityTypes": ["chatMessage"], "query": {"queryString": query}, "from": start, "size": size}]}) or {}
+    body = (
+        await c.graph.post(
+            "/search/query",
+            {
+                "requests": [
+                    {"entityTypes": ["chatMessage"], "query": {"queryString": query}, "from": start, "size": size}
+                ]
+            },
+        )
+        or {}
+    )
     return ((body.get("value") or [{}])[0].get("hitsContainers") or [{}])[0]
 
 
-async def _chat_page(c: Call, query: str | None, unread_only: bool, n: int, state: dict | None) -> tuple[list, str | None]:
+async def _chat_page(
+    c: Call, query: str | None, unread_only: bool, n: int, state: dict | None
+) -> tuple[list, str | None]:
     if query:
         start = state["from"] if state else 0
         box = await _search_chat_messages(c, query, start, n)
@@ -174,11 +195,19 @@ async def _chat_page(c: Call, query: str | None, unread_only: bool, n: int, stat
         for h in box.get("hits") or []:
             r = h.get("resource") or {}
             f = r.get("from") or {}
-            name = ((f.get("emailAddress") or {}).get("name") or (f.get("user") or {}).get("displayName") or "unknown")
+            name = (f.get("emailAddress") or {}).get("name") or (f.get("user") or {}).get("displayName") or "unknown"
             snippet = html_to_text(h.get("summary") or "")[:300]
-            items.append(compact({"chat": r.get("chatId"), "message": r.get("id"), "from": name,
-                                  "time": from_graph(r.get("createdDateTime"), c.tz),
-                                  "snippet": content_block(name, snippet) if snippet else None}))
+            items.append(
+                compact(
+                    {
+                        "chat": r.get("chatId"),
+                        "message": r.get("id"),
+                        "from": name,
+                        "time": from_graph(r.get("createdDateTime"), c.tz),
+                        "snippet": content_block(name, snippet) if snippet else None,
+                    }
+                )
+            )
         # Measured: moreResultsAvailable stays true after the last hit, and the pages behind it are
         # empty, so a caller following has_more never stopped. One hit read ahead settles it.
         more = None
@@ -191,9 +220,14 @@ async def _chat_page(c: Call, query: str | None, unread_only: bool, n: int, stat
     if state:
         page = await c.graph.page(state["next"])
     else:
-        page = await c.graph.page("/me/chats", params={
-            "$expand": "lastMessagePreview,members", "$orderby": "lastMessagePreview/createdDateTime desc",
-            "$top": str(min(50, max(n, 1)))})
+        page = await c.graph.page(
+            "/me/chats",
+            params={
+                "$expand": "lastMessagePreview,members",
+                "$orderby": "lastMessagePreview/createdDateTime desc",
+                "$top": str(min(50, max(n, 1))),
+            },
+        )
     items = []
     for ch in page.items:
         prev = ch.get("lastMessagePreview") or {}
@@ -201,20 +235,32 @@ async def _chat_page(c: Call, query: str | None, unread_only: bool, n: int, stat
         unread = bool(prev.get("createdDateTime") and (not seen or prev["createdDateTime"] > seen))
         if unread_only and not unread:
             continue
-        last_text = html_to_text((prev.get("body") or {}).get("content") or "")[:150] if not prev.get("isDeleted") else None
+        last_text = (
+            html_to_text((prev.get("body") or {}).get("content") or "")[:150] if not prev.get("isDeleted") else None
+        )
         last = content_block(_author(prev)[:60], last_text) if last_text else None
         others = [m for m in ch.get("members") or [] if m.get("userId") != me["id"]]
-        items.append(compact({
-            "id": ch.get("id"), "title": _title(ch, me["id"]), "kind": _KIND.get(ch.get("chatType", ""), ch.get("chatType")),
-            # Two chats with a person of the same name differ by address.
-            "with": others[0].get("email") if ch.get("chatType") == "oneOnOne" and others else None,
-            "members": len(ch.get("members") or []) or None,
-            "last": last, "last_from": _author(prev) if last else None,
-            "last_deleted": True if prev.get("isDeleted") else None,
-            "last_time": from_graph(prev.get("createdDateTime"), c.tz), "unread": unread,
-        }))
+        items.append(
+            compact(
+                {
+                    "id": ch.get("id"),
+                    "title": _title(ch, me["id"]),
+                    "kind": _KIND.get(ch.get("chatType", ""), ch.get("chatType")),
+                    # Two chats with a person of the same name differ by address.
+                    "with": others[0].get("email") if ch.get("chatType") == "oneOnOne" and others else None,
+                    "members": len(ch.get("members") or []) or None,
+                    "last": last,
+                    "last_from": _author(prev) if last else None,
+                    "last_deleted": True if prev.get("isDeleted") else None,
+                    "last_time": from_graph(prev.get("createdDateTime"), c.tz),
+                    "unread": unread,
+                }
+            )
+        )
     nxt = await _still_more(c, page.next_link)
-    return (items[:n] if not nxt else items), c.cursor_out({"k": "chats", "u": unread_only, "next": nxt} if nxt else None)
+    return (items[:n] if not nxt else items), c.cursor_out(
+        {"k": "chats", "u": unread_only, "next": nxt} if nxt else None
+    )
 
 
 def _list_of(kind: str, team: str | None, query: str | None, unread_only: bool) -> list[Any]:
@@ -235,7 +281,9 @@ def _cursor_list(state: dict) -> list[Any]:
     return ["chats", state.get("u")]
 
 
-async def _team_channels(c: Call, team: str | None, query: str | None, n: int, start: int = 0) -> tuple[list, str | None]:
+async def _team_channels(
+    c: Call, team: str | None, query: str | None, n: int, start: int = 0
+) -> tuple[list, str | None]:
     """Up to n teams with their channels from position `start`, and the cursor of the rest. The
     teams after the page are read until one that would be shown, so has_more is not a guess."""
     teams = (await c.graph.get("/me/joinedTeams", params={"$select": "id,displayName"})).get("value", [])
@@ -245,10 +293,15 @@ async def _team_channels(c: Call, team: str | None, query: str | None, n: int, s
     items: list[dict[str, Any]] = []
     for i in range(start, len(teams)):
         t = teams[i]
-        chans = (await c.graph.get(f"/teams/{t['id']}/channels",
-                                   params={"$select": "id,displayName,membershipType"})).get("value", [])
-        names = [x["displayName"] + (f" ({x['membershipType']})" if x.get("membershipType") not in (None, "standard") else "")
-                 for x in chans if not q or q in x["displayName"].casefold() or q in t["displayName"].casefold()]
+        chans = (
+            await c.graph.get(f"/teams/{t['id']}/channels", params={"$select": "id,displayName,membershipType"})
+        ).get("value", [])
+        names = [
+            x["displayName"]
+            + (f" ({x['membershipType']})" if x.get("membershipType") not in (None, "standard") else "")
+            for x in chans
+            if not q or q in x["displayName"].casefold() or q in t["displayName"].casefold()
+        ]
         if not names:
             continue
         if len(items) >= n:
@@ -257,12 +310,22 @@ async def _team_channels(c: Call, team: str | None, query: str | None, n: int, s
     return items, None
 
 
-@tool(area="teams", title="List Teams chats and channels", scopes=["Chat.ReadWrite", "Team.ReadBasic.All", "Channel.ReadBasic.All"],
-      read_only=True, idempotent=True, returns_list=True)
+@tool(
+    area="teams",
+    title="List Teams chats and channels",
+    scopes=["Chat.ReadWrite", "Team.ReadBasic.All", "Channel.ReadBasic.All"],
+    read_only=True,
+    idempotent=True,
+    returns_list=True,
+)
 async def list_conversations(
-    kind: Annotated[Literal["chat", "channel", "all"], Field(description="all: chats, and teams with their channels.")] = "chat",
+    kind: Annotated[
+        Literal["chat", "channel", "all"], Field(description="all: chats, and teams with their channels.")
+    ] = "chat",
     team: Annotated[str | None, Field(description="Channels of this team only.")] = None,
-    query: Annotated[str | None, Field(description="Chats: words in messages, returning the messages. Channels: part of a name.")] = None,
+    query: Annotated[
+        str | None, Field(description="Chats: words in messages, returning the messages. Channels: part of a name.")
+    ] = None,
     unread_only: Annotated[bool, Field(description="Chats only.")] = False,
     limit: int = 10,
     cursor: Annotated[str | None, Field(description="From the previous page's result.")] = None,
@@ -282,11 +345,17 @@ async def list_conversations(
             # Given alone, a cursor continues the list it was made for, as in list_messages.
             k = state.get("k")
             kind = "channel" if k == "channel" else "chat"
-            team, query, unread_only = state.get("team") if k == "channel" else None, state.get("q"), bool(state.get("u"))
+            team, query, unread_only = (
+                state.get("team") if k == "channel" else None,
+                state.get("q"),
+                bool(state.get("u")),
+            )
         if state is not None and _cursor_list(state) != _list_of(kind, team, query, unread_only):
-            raise invalid("This cursor continues another list (a search for other words, the chat list, or "
-                          "the channel list), not the one these arguments ask for. Repeat the call without "
-                          "the cursor to start it.")
+            raise invalid(
+                "This cursor continues another list (a search for other words, the chat list, or "
+                "the channel list), not the one these arguments ask for. Repeat the call without "
+                "the cursor to start it."
+            )
         if kind == "channel":
             c.need("Team.ReadBasic.All", "Channel.ReadBasic.All")
             items, nxt = await _team_channels(c, team, query, n, (state or {}).get("from", 0))
@@ -307,7 +376,9 @@ async def _one_on_one(c: Call, who_query: str, me: dict[str, Any]) -> dict[str, 
     w = await person(c, who_query)
     if w.address.casefold() in _mine(me):
         raise invalid("That is you: a one-to-one chat is with another person. Name them, or give a chat id.")
-    page = await c.graph.page("/me/chats", params={"$filter": "chatType eq 'oneOnOne'", "$expand": "members", "$top": "50"})
+    page = await c.graph.page(
+        "/me/chats", params={"$filter": "chatType eq 'oneOnOne'", "$expand": "members", "$top": "50"}
+    )
     for _ in range(6):
         for ch in page.items:
             for m in ch.get("members") or []:
@@ -316,8 +387,10 @@ async def _one_on_one(c: Call, who_query: str, me: dict[str, Any]) -> dict[str, 
         if not page.next_link:
             break
         page = await c.graph.page(page.next_link)
-    raise invalid(f"There is no one-to-one chat with {w.name or w.address} yet. send_message starts one with "
-                  "someone in the organisation; people Teams cannot reach are written to by mail.")
+    raise invalid(
+        f"There is no one-to-one chat with {w.name or w.address} yet. send_message starts one with "
+        "someone in the organisation; people Teams cannot reach are written to by mail."
+    )
 
 
 async def _group_chat_with(c: Call, me: dict[str, Any], addresses: list[str]) -> dict[str, Any] | None:
@@ -328,8 +401,9 @@ async def _group_chat_with(c: Call, me: dict[str, Any], addresses: list[str]) ->
     if len(want) < 2:
         return None  # one person named twice is not a group; creating says so as before
     try:
-        page = await c.graph.page("/me/chats", params={"$filter": "chatType eq 'group'", "$expand": "members",
-                                                       "$top": "50"})
+        page = await c.graph.page(
+            "/me/chats", params={"$filter": "chatType eq 'group'", "$expand": "members", "$top": "50"}
+        )
         for _ in range(6):
             for ch in page.items:
                 members = ch.get("members") or []
@@ -344,8 +418,16 @@ async def _group_chat_with(c: Call, me: dict[str, Any], addresses: list[str]) ->
     return None
 
 
-async def _chat_messages(c: Call, me: dict[str, Any], chat: str | None, who: str | None, n: int,
-                         before: str | None, attachments_only: bool, include_members: bool) -> dict[str, Any]:
+async def _chat_messages(
+    c: Call,
+    me: dict[str, Any],
+    chat: str | None,
+    who: str | None,
+    n: int,
+    before: str | None,
+    attachments_only: bool,
+    include_members: bool,
+) -> dict[str, Any]:
     if chat:
         ch = await c.graph.get(f"/chats/{chat}", params={"$expand": "members"})
     else:
@@ -357,6 +439,7 @@ async def _chat_messages(c: Call, me: dict[str, Any], chat: str | None, who: str
     params = {"$top": str(top), "$orderby": "createdDateTime desc"}
     if before:
         params["$filter"] = f"createdDateTime lt {_before(before, c)}"
+
     def shown(batch: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
         rows = [(m, x) for m, x in ((m, _message(m, c, me["id"])) for m in batch) if x]
         return [(m, x) for m, x in rows if x.get("files")] if attachments_only else rows
@@ -373,7 +456,11 @@ async def _chat_messages(c: Call, me: dict[str, Any], chat: str | None, who: str
         page = await c.graph.page(page.next_link)
         raw = page.items
         pairs += shown(raw)
-    out: dict[str, Any] = {"chat": ch["id"], "title": _title(ch, me["id"]), "kind": _KIND.get(ch.get("chatType", ""), ch.get("chatType"))}
+    out: dict[str, Any] = {
+        "chat": ch["id"],
+        "title": _title(ch, me["id"]),
+        "kind": _KIND.get(ch.get("chatType", ""), ch.get("chatType")),
+    }
     if include_members:
         out["members"] = [m.get("displayName") for m in ch.get("members") or [] if m.get("displayName")]
     out["messages"] = list(reversed([x for _, x in pairs[:n]]))
@@ -385,8 +472,17 @@ async def _chat_messages(c: Call, me: dict[str, Any], chat: str | None, who: str
     return out
 
 
-async def _channel_messages(c: Call, me: dict[str, Any], team: str, channel: str, n: int, thread: str | None,
-                            before: str | None, attachments_only: bool, state: dict | None) -> dict[str, Any]:
+async def _channel_messages(
+    c: Call,
+    me: dict[str, Any],
+    team: str,
+    channel: str,
+    n: int,
+    thread: str | None,
+    before: str | None,
+    attachments_only: bool,
+    state: dict | None,
+) -> dict[str, Any]:
     t, ch = await _channel(c, team, channel)
     base = f"/teams/{t['id']}/channels/{ch['id']}/messages"
     conv = f"{t['id']}/{ch['id']}/{thread or ''}"
@@ -399,14 +495,25 @@ async def _channel_messages(c: Call, me: dict[str, Any], team: str, channel: str
     attachments_only = attachments_only or bool((state or {}).get("files"))
     if thread:
         try:
-            page = await c.graph.page(state["next"]) if state else await c.graph.page(f"{base}/{thread}/replies", params={"$top": str(n)})
+            page = (
+                await c.graph.page(state["next"])
+                if state
+                else await c.graph.page(f"{base}/{thread}/replies", params={"$top": str(n)})
+            )
             # The root comes with the first page only; a later page continues the replies.
             first = [] if state else [await c.graph.get(f"{base}/{thread}")]
         except GraphError as e:
             if _malformed(e, thread):
                 raise M365Error("not_found") from None
             raise
-        rows = [x for x in (_message(m, c, me["id"]) for m in [*first, *sorted(page.items, key=lambda r: r.get("createdDateTime") or "")]) if x]
+        rows = [
+            x
+            for x in (
+                _message(m, c, me["id"])
+                for m in [*first, *sorted(page.items, key=lambda r: r.get("createdDateTime") or "")]
+            )
+            if x
+        ]
         # The root and up to n replies, as read: nothing fetched is dropped but what the filter asks.
         if attachments_only:
             rows = [m for m in rows if m.get("files")]
@@ -432,7 +539,11 @@ async def _channel_messages(c: Call, me: dict[str, Any], team: str, channel: str
         done: set[str] = set(st.get("done") or [])
 
         async def fetch(url: str | None) -> Any:
-            return await c.graph.page(url) if url else await c.graph.page(base, params={"$top": str(top), "$expand": "replies"})
+            return (
+                await c.graph.page(url)
+                if url
+                else await c.graph.page(base, params={"$top": str(top), "$expand": "replies"})
+            )
 
         page, rows, pages = await fetch(src), [], 0
         while True:
@@ -452,16 +563,27 @@ async def _channel_messages(c: Call, me: dict[str, Any], team: str, channel: str
                     full = True
                     # The rest of the page is read again by the cursor only when it holds a post that
                     # would be shown; soft-deleted ones left there made empty pages say has_more.
-                    if any(x.get("id") not in done and not (limit_iso and (x.get("createdDateTime") or "") >= limit_iso)
-                           and _shown(x, c, me, attachments_only) for x in page.items[i + 1:]):
+                    if any(
+                        x.get("id") not in done
+                        and not (limit_iso and (x.get("createdDateTime") or "") >= limit_iso)
+                        and _shown(x, c, me, attachments_only)
+                        for x in page.items[i + 1 :]
+                    ):
                         resume = {"next": src, "done": sorted(done)}
                     break
             pages += 1
             if full or not page.next_link or pages >= CHANNEL_SCAN_PAGES:
                 if not resume and page.next_link:
-                    resume = {"next": await _still_more(c, page.next_link, shown=lambda m: (
-                        not (limit_iso and (m.get("createdDateTime") or "") >= limit_iso)
-                        and _shown(m, c, me, attachments_only)))}
+                    resume = {
+                        "next": await _still_more(
+                            c,
+                            page.next_link,
+                            shown=lambda m: (
+                                not (limit_iso and (m.get("createdDateTime") or "") >= limit_iso)
+                                and _shown(m, c, me, attachments_only)
+                            ),
+                        )
+                    }
                     resume = resume if resume["next"] else None
                 break
             src, done = page.next_link, set()
@@ -475,10 +597,18 @@ async def _channel_messages(c: Call, me: dict[str, Any], team: str, channel: str
     return out
 
 
-@tool(area="teams", title="Read a Teams chat or channel", scopes=["Chat.ReadWrite", "ChannelMessage.Read.All"],
-      read_only=True, idempotent=True,
-      gates={"team": ("switch", "teams_channels"), "channel": ("switch", "teams_channels"),
-             "thread": ("switch", "teams_channels")})
+@tool(
+    area="teams",
+    title="Read a Teams chat or channel",
+    scopes=["Chat.ReadWrite", "ChannelMessage.Read.All"],
+    read_only=True,
+    idempotent=True,
+    gates={
+        "team": ("switch", "teams_channels"),
+        "channel": ("switch", "teams_channels"),
+        "thread": ("switch", "teams_channels"),
+    },
+)
 async def get_conversation(
     chat: Annotated[str | None, Field(description="A chat id from list_conversations.")] = None,
     person: Annotated[str | None, Field(description="Or the other person of a one-to-one chat.")] = None,
@@ -486,8 +616,13 @@ async def get_conversation(
     channel: Annotated[str | None, Field(description="A channel's name in that team.")] = None,
     thread: Annotated[str | None, Field(description="A channel post id: it and its replies.")] = None,
     messages: Annotated[int, Field(description="How many, 1 to 50.")] = 20,
-    before: Annotated[str | None, Field(description="Older than this time, or the last next_before; channels search their latest 200 posts.")] = None,
-    cursor: Annotated[str | None, Field(description="A channel's or thread's next page, from the previous result.")] = None,
+    before: Annotated[
+        str | None,
+        Field(description="Older than this time, or the last next_before; channels search their latest 200 posts."),
+    ] = None,
+    cursor: Annotated[
+        str | None, Field(description="A channel's or thread's next page, from the previous result.")
+    ] = None,
     include_members: Annotated[bool, Field(description="Chats only.")] = False,
     attachments_only: Annotated[bool, Field(description="Only messages that carry files.")] = False,
 ) -> dict[str, Any]:
@@ -523,9 +658,13 @@ async def get_conversation(
         out["messages"], out["has_more"] = shown, more
         if messages > MAX_MESSAGES:
             out["messages_clamped_to"] = MAX_MESSAGES
-        out["order"] = ("latest activity first" if in_channel and not thread else
-                        "oldest first; the last item is the newest, and next_before leads to older ones"
-                        if not in_channel else "the post, then its replies, oldest first")
+        out["order"] = (
+            "latest activity first"
+            if in_channel and not thread
+            else "oldest first; the last item is the newest, and next_before leads to older ones"
+            if not in_channel
+            else "the post, then its replies, oldest first"
+        )
         if not shown and not more:  # with more behind, empty is only what was read so far
             out["empty"] = _why_empty(in_channel, bool(thread), attachments_only, bool(before))
         notes = _notes(shown)
@@ -540,8 +679,11 @@ def _why_empty(in_channel: bool, thread: bool, files_only: bool, before: bool) -
     if files_only:
         return "No messages with files in what was read; the conversation may still hold others."
     if before:
-        return ("No posts older than that among the latest 200 read." if in_channel
-                else "Nothing older than the point asked for.")
+        return (
+            "No posts older than that among the latest 200 read."
+            if in_channel
+            else "Nothing older than the point asked for."
+        )
     if thread:
         return "The thread has no replies that are still there."
     if in_channel:
@@ -550,6 +692,7 @@ def _why_empty(in_channel: bool, thread: bool, files_only: bool, before: bool) -
 
 
 # -- writing -------------------------------------------------------------------------------
+
 
 def _classify(to: list[str]) -> tuple[str, list[str]]:
     refs = [t.strip() for t in to if t.strip()]
@@ -565,8 +708,11 @@ def _classify(to: list[str]) -> tuple[str, list[str]]:
 
 
 def _member(ref: str) -> dict[str, Any]:
-    return {"@odata.type": "#microsoft.graph.aadUserConversationMember", "roles": ["owner"],
-            USER_BIND: GRAPH_USER.format(ref.replace("'", "''"))}
+    return {
+        "@odata.type": "#microsoft.graph.aadUserConversationMember",
+        "roles": ["owner"],
+        USER_BIND: GRAPH_USER.format(ref.replace("'", "''")),
+    }
 
 
 def _put_mentions(html: str, names: list[str]) -> str:
@@ -582,7 +728,12 @@ async def _file_reference(c: Call, item_id: str) -> dict[str, Any]:
     m = _GUID.search(item.get("eTag") or "")
     if not m or not item.get("webDavUrl"):
         raise invalid("That file cannot be attached by reference. Share its link instead.")
-    return {"id": m.group(1), "contentType": "reference", "contentUrl": item["webDavUrl"], "name": item.get("name") or "file"}
+    return {
+        "id": m.group(1),
+        "contentType": "reference",
+        "contentUrl": item["webDavUrl"],
+        "name": item.get("name") or "file",
+    }
 
 
 def _hosted(prepared: Any) -> tuple[str, list[dict[str, Any]]]:
@@ -591,13 +742,19 @@ def _hosted(prepared: Any) -> tuple[str, list[dict[str, Any]]]:
     html, hosted = prepared.html, []
     for i, img in enumerate(prepared.inline_images, 1):
         html = html.replace(f"cid:{img.content_id}", f"../hostedContents/{i}/$value")
-        hosted.append({"@microsoft.graph.temporaryId": str(i), "contentBytes": base64.b64encode(img.data).decode(),
-                       "contentType": img.content_type})
+        hosted.append(
+            {
+                "@microsoft.graph.temporaryId": str(i),
+                "contentBytes": base64.b64encode(img.data).decode(),
+                "contentType": img.content_type,
+            }
+        )
     return html, hosted
 
 
-async def _recipients_named(c: Call, kind: str, refs: list[str], who_list: list[Who], team: Any, chan: Any,
-                            me: dict[str, Any]) -> str:
+async def _recipients_named(
+    c: Call, kind: str, refs: list[str], who_list: list[Who], team: Any, chan: Any, me: dict[str, Any]
+) -> str:
     if kind == "channel":
         return f"the channel {team['displayName']}/{chan['displayName']}, seen by all its members"
     if kind == "people":
@@ -606,13 +763,28 @@ async def _recipients_named(c: Call, kind: str, refs: list[str], who_list: list[
         info = await c.graph.get(f"/chats/{refs[0]}", params={"$expand": "members"})
     except GraphError:
         return ""  # naming is a courtesy: the confirmation is asked for whether or not the chat can be read
-    people = [f"{m['displayName']} <{m['email']}>" if m.get("displayName") and m.get("email") else m.get("displayName") or m.get("email") or "someone"
-              for m in info.get("members") or [] if m.get("userId") != me.get("id")]
-    return ("the chat " + (content_line("a member of the chat", info["topic"]) + " " if info.get("topic") else "") + "with " + "; ".join(people[:10])) if people else "this chat"
+    people = [
+        f"{m['displayName']} <{m['email']}>"
+        if m.get("displayName") and m.get("email")
+        else m.get("displayName") or m.get("email") or "someone"
+        for m in info.get("members") or []
+        if m.get("userId") != me.get("id")
+    ]
+    return (
+        (
+            "the chat "
+            + (content_line("a member of the chat", info["topic"]) + " " if info.get("topic") else "")
+            + "with "
+            + "; ".join(people[:10])
+        )
+        if people
+        else "this chat"
+    )
 
 
-async def _member_addresses(c: Call, me: dict[str, Any], *, team: Any = None, chan: Any = None,
-                            chat: str | None = None, nothing: str) -> list[str]:
+async def _member_addresses(
+    c: Call, me: dict[str, Any], *, team: Any = None, chan: Any = None, chat: str | None = None, nothing: str
+) -> list[str]:
     """The addresses of a chat's or channel's members other than the person, for the domain check.
 
     The members were chosen in Teams, not here; with domains limited, they are read so an outside
@@ -631,20 +803,39 @@ async def _member_addresses(c: Call, me: dict[str, Any], *, team: Any = None, ch
         members += got.items
         next_page = got.next_link
     if next_page:
-        raise invalid(f"This {'chat' if chat else 'channel'} has too many members to check against the allowed domains. {nothing}")
+        raise invalid(
+            f"This {'chat' if chat else 'channel'} has too many members to check against the allowed domains. {nothing}"
+        )
     return [m.get("email") or "" for m in members if m.get("userId") != me.get("id")]
 
 
-@tool(area="teams", title="Send a Teams message", scopes=["ChatMessage.Send", "ChannelMessage.Send", "Chat.ReadWrite"],
-      notifies_others=True, irreversible=True)
+@tool(
+    area="teams",
+    title="Send a Teams message",
+    scopes=["ChatMessage.Send", "ChannelMessage.Send", "Chat.ReadWrite"],
+    notifies_others=True,
+    irreversible=True,
+)
 async def send_message(
-    to: Annotated[list[str], Field(description="A list with one chat id, or one Team/Channel, or people by name or address (one to 20).")],
+    to: Annotated[
+        list[str],
+        Field(description="A list with one chat id, or one Team/Channel, or people by name or address (one to 20)."),
+    ],
     body: str,
     body_format: Literal["text", "html"] = "text",
-    reply_to: Annotated[str | None, Field(description="A channel post id to answer in its thread. Chats have no threads.")] = None,
-    mentions: Annotated[list[str] | None, Field(description="People to @mention; each is placed where @Name appears in the body, else first.")] = None,
-    file_ids: Annotated[list[str] | None, Field(description="OneDrive item ids to attach by reference, from list_files.")] = None,
-    user_confirmed: Annotated[bool, Field(description="True only when the person explicitly asked for this message to be sent.")] = False,
+    reply_to: Annotated[
+        str | None, Field(description="A channel post id to answer in its thread. Chats have no threads.")
+    ] = None,
+    mentions: Annotated[
+        list[str] | None,
+        Field(description="People to @mention; each is placed where @Name appears in the body, else first."),
+    ] = None,
+    file_ids: Annotated[
+        list[str] | None, Field(description="OneDrive item ids to attach by reference, from list_files.")
+    ] = None,
+    user_confirmed: Annotated[
+        bool, Field(description="True only when the person explicitly asked for this message to be sent.")
+    ] = False,
 ) -> dict[str, Any]:
     """Send a Teams message to a chat, to people (a one-to-one or group chat is found or created) or
     to a channel, where reply_to answers a thread. Everyone in the chat sees it at once and it
@@ -668,8 +859,12 @@ async def send_message(
             team, chan = await _channel_ref(c, refs[0])
         elif kind == "people":
             c.need("Chat.ReadWrite")
-            who_list = [w for w in await recipients(c, refs)
-                        if w.address.casefold() not in {(me.get("mail") or "").casefold(), (me.get("userPrincipalName") or "").casefold()}]
+            who_list = [
+                w
+                for w in await recipients(c, refs)
+                if w.address.casefold()
+                not in {(me.get("mail") or "").casefold(), (me.get("userPrincipalName") or "").casefold()}
+            ]
             if not who_list:
                 raise invalid("Name at least one person other than the sender.")
         audience = [w.address for w in who_list]
@@ -678,8 +873,9 @@ async def send_message(
             # person names a real recipient, not the name the model guessed.
             raise M365Error("confirm", names=await _recipients_named(c, kind, refs, who_list, team, chan, me))
         if kind in ("chat", "channel") and c.rt.settings.allowed_recipient_domains:
-            audience = await _member_addresses(c, me, team=team, chan=chan, chat=None if kind == "channel" else refs[0],
-                                               nothing="Nothing was sent.")
+            audience = await _member_addresses(
+                c, me, team=team, chan=chan, chat=None if kind == "channel" else refs[0], nothing="Nothing was sent."
+            )
         mentioned = []
         for ref in mentions or []:
             w = await person(c, ref)
@@ -699,12 +895,25 @@ async def send_message(
         if hosted:
             payload["hostedContents"] = hosted
         if mentioned:
-            payload["mentions"] = [{"id": i, "mentionText": u["displayName"], "mentioned": {"user": {
-                "id": u["id"], "displayName": u["displayName"], "userIdentityType": "aadUser"}}} for i, u in enumerate(mentioned)]
+            payload["mentions"] = [
+                {
+                    "id": i,
+                    "mentionText": u["displayName"],
+                    "mentioned": {
+                        "user": {"id": u["id"], "displayName": u["displayName"], "userIdentityType": "aadUser"}
+                    },
+                }
+                for i, u in enumerate(mentioned)
+            ]
         if files:
             payload["attachments"] = files
-        receipt = c.guard(kind="teams_message", user_confirmed=user_confirmed, recipients=max(len(who_list), 1),
-                          group_addresses=groups_among(who_list), addresses=audience)
+        receipt = c.guard(
+            kind="teams_message",
+            user_confirmed=user_confirmed,
+            recipients=max(len(who_list), 1),
+            group_addresses=groups_among(who_list),
+            addresses=audience,
+        )
         reused: dict[str, Any] | None = None
         if kind == "channel":
             path = f"/teams/{team['id']}/channels/{chan['id']}/messages" + (f"/{reply_to}/replies" if reply_to else "")
@@ -717,9 +926,16 @@ async def send_message(
                 chat_id = found_chat["id"] if found_chat else None
                 reused = found_chat
                 if chat_id is None:
-                    created = await c.graph.post("/chats", {
-                        "chatType": "oneOnOne" if len(who_list) == 1 else "group",
-                        "members": [_member(me["id"]), *[_member(w.address) for w in who_list]]}) or {}
+                    created = (
+                        await c.graph.post(
+                            "/chats",
+                            {
+                                "chatType": "oneOnOne" if len(who_list) == 1 else "group",
+                                "members": [_member(me["id"]), *[_member(w.address) for w in who_list]],
+                            },
+                        )
+                        or {}
+                    )
                     chat_id = created["id"]
             path = f"/chats/{chat_id}/messages"
             where = ", ".join(w.name or w.address for w in who_list) or chat_id
@@ -735,14 +951,26 @@ async def send_message(
             audience_is = f"{len(who_list)} " + ("person" if len(who_list) == 1 else "people")
         else:
             audience_is = "everyone in the chat"
-        out = compact({"sent": True, "to": where, "audience": audience_is, "message_id": sent.get("id"),
-                       "chat": None if kind == "channel" else path.split("/")[2],
-                       "html": prepared.report() if prepared.sanitized or prepared.warnings else None,
-                       # Said, so a message meant as new does not land unnoticed in an old named chat.
-                       "chat_note": None if not reused else (
-                           "Sent in the existing group chat with these people, named "
-                           + content_line("a member of the chat", reused["topic"]) + "."
-                           if reused.get("topic") else "Sent in the existing group chat with these people.")})
+        out = compact(
+            {
+                "sent": True,
+                "to": where,
+                "audience": audience_is,
+                "message_id": sent.get("id"),
+                "chat": None if kind == "channel" else path.split("/")[2],
+                "html": prepared.report() if prepared.sanitized or prepared.warnings else None,
+                # Said, so a message meant as new does not land unnoticed in an old named chat.
+                "chat_note": None
+                if not reused
+                else (
+                    "Sent in the existing group chat with these people, named "
+                    + content_line("a member of the chat", reused["topic"])
+                    + "."
+                    if reused.get("topic")
+                    else "Sent in the existing group chat with these people."
+                ),
+            }
+        )
         return {**out, "sends_left_now": receipt["sends_left_now"]}
 
 
@@ -758,12 +986,18 @@ async def _deleted_post(c: Call, listing: str, mid: str) -> dict[str, Any]:
             break
         page = await c.graph.page(page.next_link)
     # Not "it does not exist": the scan stopped while older posts remained.
-    raise invalid(f"That post is not among the latest {CHANNEL_SCAN_PAGES * MAX_MESSAGES} in the channel, so it "
-                  "cannot be found to restore here. Restore it in Teams.")
+    raise invalid(
+        f"That post is not among the latest {CHANNEL_SCAN_PAGES * MAX_MESSAGES} in the channel, so it "
+        "cannot be found to restore here. Restore it in Teams."
+    )
 
 
-@tool(area="teams", title="Edit or delete a Teams message", scopes=["Chat.ReadWrite", "ChannelMessage.ReadWrite"],
-      notifies_others=True)
+@tool(
+    area="teams",
+    title="Edit or delete a Teams message",
+    scopes=["Chat.ReadWrite", "ChannelMessage.ReadWrite"],
+    notifies_others=True,
+)
 async def update_message(
     id: Annotated[str, Field(description="The message id from get_conversation.")],
     action: Literal["edit", "delete", "restore"],
@@ -771,7 +1005,9 @@ async def update_message(
     channel: Annotated[str | None, Field(description="Team/Channel, for a post in a channel.")] = None,
     body: Annotated[str | None, Field(description="The new text for edit.")] = None,
     thread: Annotated[str | None, Field(description="For a channel reply: the id of the post it answers.")] = None,
-    user_confirmed: Annotated[bool, Field(description="True only when the person asked for this message to be changed.")] = False,
+    user_confirmed: Annotated[
+        bool, Field(description="True only when the person asked for this message to be changed.")
+    ] = False,
 ) -> dict[str, Any]:
     """Edit, delete or restore one of the person's own Teams messages, in a chat or a channel post.
     Everyone in the conversation sees the change at once, so set user_confirmed only after the person
@@ -836,31 +1072,46 @@ async def update_message(
             await c.graph.post(f"{action_path}/{'softDelete' if action == 'delete' else 'undoSoftDelete'}", None)
         out: dict[str, Any] = {"done": action, "id": id, **allowance(receipt)}
         if action == "delete":
-            out["note"] = (f"Soft delete: Teams shows it as deleted and keeps it. update_message action=restore with id {id} "
-                           "and the same chat or channel brings it back.")
+            out["note"] = (
+                f"Soft delete: Teams shows it as deleted and keeps it. update_message action=restore with id {id} "
+                "and the same chat or channel brings it back."
+            )
         return out
 
 
-@tool(area="teams", title="Create or change a group chat", scopes=["Chat.ReadWrite"], notifies_others=True,
-      switch="chat_admin")
+@tool(
+    area="teams",
+    title="Create or change a group chat",
+    scopes=["Chat.ReadWrite"],
+    notifies_others=True,
+    switch="chat_admin",
+)
 async def save_chat(
     chat: Annotated[str | None, Field(description="A group chat id to change. Omit to create a group chat.")] = None,
     topic: Annotated[str | None, Field(description="The chat's name.")] = None,
     add_members: Annotated[list[str] | None, Field(description="People to add, by name or address.")] = None,
     remove_members: Annotated[list[str] | None, Field(description="People to remove, by name or address.")] = None,
-    share_history: Annotated[bool, Field(description="Added people see the whole earlier conversation, not just what follows.")] = False,
-    user_confirmed: Annotated[bool, Field(description="True only when the person asked to create, rename or change who is in the chat.")] = False,
+    share_history: Annotated[
+        bool, Field(description="Added people see the whole earlier conversation, not just what follows.")
+    ] = False,
+    user_confirmed: Annotated[
+        bool, Field(description="True only when the person asked to create, rename or change who is in the chat.")
+    ] = False,
 ) -> dict[str, Any]:
     """Create a group chat, rename one, or add and remove its members. Every member sees each of these
     at once, so it needs user_confirmed from the person's own request. One-to-one chats have
     fixed members. New members see messages from now on unless share_history. A new group chat needs at least two other people, at most 20 people per call."""
-    two_others = "A new group chat needs at least two other people in add_members, each named once. Nothing was changed."
+    two_others = (
+        "A new group chat needs at least two other people in add_members, each named once. Nothing was changed."
+    )
     if not chat and len(add_members or []) < 2:
         raise invalid(two_others)
     if topic is not None and not topic.strip():
         raise invalid("A chat name cannot be blank. Give a name, or leave topic out. Nothing was changed.")
     if topic is not None and len(topic.strip()) > MAX_TOPIC:
-        raise invalid(f"A chat name is at most {MAX_TOPIC} characters; this has {len(topic.strip())}. Nothing was changed.")
+        raise invalid(
+            f"A chat name is at most {MAX_TOPIC} characters; this has {len(topic.strip())}. Nothing was changed."
+        )
     topic = topic.strip() if topic else topic
     if not (topic or add_members or remove_members):
         raise invalid("Nothing to change: give a topic or members.")
@@ -868,8 +1119,13 @@ async def save_chat(
         c.need("Chat.ReadWrite")
         me = await _me(c)
         # One entry per person, and never the person themselves: Graph refuses both with a bare 400.
-        adding = list({w.address.casefold(): w for w in await recipients(c, add_members)
-                       if w.address.casefold() not in _mine(me)}.values())
+        adding = list(
+            {
+                w.address.casefold(): w
+                for w in await recipients(c, add_members)
+                if w.address.casefold() not in _mine(me)
+            }.values()
+        )
         if not chat and len(adding) < 2:
             raise invalid(two_others)
         removing = await recipients(c, remove_members)
@@ -880,7 +1136,9 @@ async def save_chat(
             if info.get("chatType") != "group" and (adding or removing):
                 raise invalid("Members of a one-to-one or meeting chat cannot be changed.")
             if info.get("chatType") != "group" and topic:
-                raise invalid("Only group chats have a name; one-to-one and meeting chats keep theirs. Nothing was changed.")
+                raise invalid(
+                    "Only group chats have a name; one-to-one and meeting chats keep theirs. Nothing was changed."
+                )
             if adding or removing:
                 # Every page: a member on a later one would otherwise be added twice or not found.
                 next_page: str | None = f"/chats/{chat}/members"
@@ -891,8 +1149,10 @@ async def save_chat(
                     existing += got.items
                     next_page = got.next_link
                 if next_page:
-                    raise invalid("This chat has more members than can be read here, so who is in it cannot be "
-                                  "checked. Change its members in Teams. Nothing was changed.")
+                    raise invalid(
+                        "This chat has more members than can be read here, so who is in it cannot be "
+                        "checked. Change its members in Teams. Nothing was changed."
+                    )
             emails = {(m.get("email") or "").casefold() for m in existing}
             mine = {(me.get("mail") or "").casefold(), (me.get("userPrincipalName") or "").casefold()} - {""}
             for w in removing:
@@ -907,12 +1167,27 @@ async def save_chat(
         receipt = {}
         if adding or removing or topic:
             # Only people being added are checked: removing someone outside the domains is allowed.
-            receipt = c.guard(kind="chat_members", user_confirmed=user_confirmed, recipients=len(adding) + len(removing),
-                              group_addresses=groups_among(adding + removing), addresses=[w.address for w in adding])
+            receipt = c.guard(
+                kind="chat_members",
+                user_confirmed=user_confirmed,
+                recipients=len(adding) + len(removing),
+                group_addresses=groups_among(adding + removing),
+                addresses=[w.address for w in adding],
+            )
         if not chat:
-            created = await c.graph.post("/chats", compact({
-                "chatType": "group", "topic": topic,
-                "members": [_member(me["id"]), *[_member(w.address) for w in adding]]})) or {}
+            created = (
+                await c.graph.post(
+                    "/chats",
+                    compact(
+                        {
+                            "chatType": "group",
+                            "topic": topic,
+                            "members": [_member(me["id"]), *[_member(w.address) for w in adding]],
+                        }
+                    ),
+                )
+                or {}
+            )
             return {"created": True, "chat": created.get("id"), **receipt}
         out: dict[str, Any] = {"chat": chat}
         if topic:
@@ -920,7 +1195,9 @@ async def save_chat(
             out["renamed_to"] = topic
         seen_from = "0001-01-01T00:00:00Z" if share_history else datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         for w in adding:
-            await c.graph.post(f"/chats/{chat}/members", {**_member(w.address), "visibleHistoryStartDateTime": seen_from})
+            await c.graph.post(
+                f"/chats/{chat}/members", {**_member(w.address), "visibleHistoryStartDateTime": seen_from}
+            )
         for w in removing:
             mid = next(m["id"] for m in existing if (m.get("email") or "").casefold() == w.address.casefold())
             await c.graph.delete(f"/chats/{chat}/members/{mid}")
@@ -931,4 +1208,3 @@ async def save_chat(
         if removing:
             out["removed"] = [w.name or w.address for w in removing]
         return {**out, **receipt}
-

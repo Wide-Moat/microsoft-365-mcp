@@ -21,11 +21,21 @@ def client(rt):
 
 
 def issue(rt, *, op, kind, target, max_bytes=None, content_type=None, person="p1"):
-    return rt.signer.issue(op=op, kind=kind, target=target, person=person, token="BEARER-XYZ", token_expires=FAR,
-                           ttl=300 if op == "d" else 180, max_bytes=max_bytes, content_type=content_type)
+    return rt.signer.issue(
+        op=op,
+        kind=kind,
+        target=target,
+        person=person,
+        token="BEARER-XYZ",
+        token_expires=FAR,
+        ttl=300 if op == "d" else 180,
+        max_bytes=max_bytes,
+        content_type=content_type,
+    )
 
 
 # -- download ------------------------------------------------------------------------------------
+
 
 def test_download_streams_the_bytes_through_a_redirect_without_the_bearer(rt, graph, client):
     graph.on("GET", "/me/drive/items/F1/content", None, status=302, headers={"Location": BLOB})
@@ -76,6 +86,7 @@ def test_download_of_a_missing_item_is_a_404_without_graph_detail(rt, graph, cli
 
 # -- upload ---------------------------------------------------------------------------------------
 
+
 def put_route(graph, path, item=None):
     item = item or {"id": "N1", "name": "report.pdf", "size": 100, "webUrl": "https://x.test/r"}
     graph.on("PUT", re.escape(path), item, status=201)
@@ -85,7 +96,12 @@ def test_a_small_upload_is_one_put_with_the_conflict_behaviour(rt, graph, client
     put_route(graph, "/me/drive/items/P1:/report.pdf:/content")
     tok = issue(rt, op="u", kind="drive_upload", target={"p": "P1", "n": "report.pdf", "c": "fail"}, max_bytes=1000)
     r = client.put(f"/u/{tok}", content=b"x" * 100)
-    assert r.status_code == 200 and r.json() == {"id": "N1", "name": "report.pdf", "size": 100, "web_url": "https://x.test/r"}
+    assert r.status_code == 200 and r.json() == {
+        "id": "N1",
+        "name": "report.pdf",
+        "size": 100,
+        "web_url": "https://x.test/r",
+    }
     puts = graph.calls("PUT", re.escape("/me/drive/items/P1:/report.pdf:/content"))
     assert len(puts) == 1 and puts[0].params == {"@microsoft.graph.conflictBehavior": "fail"}
     assert puts[0].content == b"x" * 100 and not graph.calls("POST", ".*createUploadSession")
@@ -94,28 +110,50 @@ def test_a_small_upload_is_one_put_with_the_conflict_behaviour(rt, graph, client
 @pytest.mark.parametrize("conflict", ["replace", "rename"])
 def test_the_conflict_choice_reaches_graph(rt, graph, client, conflict):
     put_route(graph, "/drives/b!s/items/P1:/a.txt:/content")
-    tok = issue(rt, op="u", kind="drive_upload", target={"p": "P1", "n": "a.txt", "c": conflict, "d": "b!s"}, max_bytes=100)
+    tok = issue(
+        rt, op="u", kind="drive_upload", target={"p": "P1", "n": "a.txt", "c": conflict, "d": "b!s"}, max_bytes=100
+    )
     assert client.put(f"/u/{tok}", content=b"abc").status_code == 200
-    assert graph.calls("PUT", re.escape("/drives/b!s/items/P1:/a.txt:/content"))[0].params["@microsoft.graph.conflictBehavior"] == conflict
+    assert (
+        graph.calls("PUT", re.escape("/drives/b!s/items/P1:/a.txt:/content"))[0].params[
+            "@microsoft.graph.conflictBehavior"
+        ]
+        == conflict
+    )
 
 
 def test_a_file_name_with_spaces_and_unicode_is_encoded_in_the_path(rt, graph, client):
     put_route(graph, "/me/drive/items/P1:/Q3 Übersicht é.xlsx:/content")
-    tok = issue(rt, op="u", kind="drive_upload", target={"p": "P1", "n": "Q3 Übersicht é.xlsx", "c": "fail"}, max_bytes=100)
+    tok = issue(
+        rt, op="u", kind="drive_upload", target={"p": "P1", "n": "Q3 Übersicht é.xlsx", "c": "fail"}, max_bytes=100
+    )
     assert client.put(f"/u/{tok}", content=b"abc").status_code == 200
 
 
 def test_a_10_mb_class_upload_uses_an_upload_session_in_aligned_chunks(rt, graph, client):
     size = 11 * 1024 * 1024
-    graph.on("POST", re.escape("/me/drive/items/P1:/big.bin:/createUploadSession"), {"uploadUrl": "https://contoso-my.sharepoint.com/upload/sess"})
-    graph.on("PUT", re.escape("https://contoso-my.sharepoint.com/upload/sess"), lambda s: httpx.Response(
-        201 if s.headers["content-range"].endswith(f"-{size - 1}/{size}") else 202,
-        json={"id": "BIG", "name": "big.bin", "size": size, "webUrl": "https://x.test/big"}))
-    tok = issue(rt, op="u", kind="drive_upload", target={"p": "P1", "n": "big.bin", "c": "rename"}, max_bytes=20 * 1024 * 1024)
+    graph.on(
+        "POST",
+        re.escape("/me/drive/items/P1:/big.bin:/createUploadSession"),
+        {"uploadUrl": "https://contoso-my.sharepoint.com/upload/sess"},
+    )
+    graph.on(
+        "PUT",
+        re.escape("https://contoso-my.sharepoint.com/upload/sess"),
+        lambda s: httpx.Response(
+            201 if s.headers["content-range"].endswith(f"-{size - 1}/{size}") else 202,
+            json={"id": "BIG", "name": "big.bin", "size": size, "webUrl": "https://x.test/big"},
+        ),
+    )
+    tok = issue(
+        rt, op="u", kind="drive_upload", target={"p": "P1", "n": "big.bin", "c": "rename"}, max_bytes=20 * 1024 * 1024
+    )
     r = client.put(f"/u/{tok}", content=bytes(size))
     assert r.status_code == 200 and r.json()["id"] == "BIG"
     sess = graph.calls("POST", re.escape("/me/drive/items/P1:/big.bin:/createUploadSession"))
-    assert len(sess) == 1 and sess[0].json == {"item": {"@microsoft.graph.conflictBehavior": "rename", "name": "big.bin"}}
+    assert len(sess) == 1 and sess[0].json == {
+        "item": {"@microsoft.graph.conflictBehavior": "rename", "name": "big.bin"}
+    }
     assert not graph.calls("PUT", re.escape("/me/drive/items/P1:/big.bin:/content"))
     chunks = graph.calls("PUT", re.escape("https://contoso-my.sharepoint.com/upload/sess"))
     assert len(chunks) == 2
@@ -138,13 +176,16 @@ def test_an_upload_over_max_bytes_is_413_and_nothing_reaches_graph(rt, graph, cl
 
 
 def test_a_graph_refusal_on_upload_is_reported_not_a_500(rt, graph, client):
-    graph.on("PUT", re.escape("/me/drive/items/P1:/a.txt:/content"), {"error": {"code": "nameAlreadyExists"}}, status=409)
+    graph.on(
+        "PUT", re.escape("/me/drive/items/P1:/a.txt:/content"), {"error": {"code": "nameAlreadyExists"}}, status=409
+    )
     tok = issue(rt, op="u", kind="drive_upload", target={"p": "P1", "n": "a.txt", "c": "fail"}, max_bytes=100)
     r = client.put(f"/u/{tok}", content=b"abc")
     assert r.status_code == 400 and "already exists" in r.json()["error"]
 
 
 # -- refusals -------------------------------------------------------------------------------------
+
 
 def test_a_tampered_link_is_403(rt, graph, client):
     tok = issue(rt, op="d", kind="drive", target={"i": "F1"})
@@ -167,8 +208,16 @@ def test_the_wrong_operation_is_403(rt, graph, client):
 
 
 def test_an_expired_link_is_403(rt, graph, client):
-    old = rt.signer.issue(op="d", kind="drive", target={"i": "F1"}, person="p", token="t", token_expires=FAR, ttl=300,
-                          now=time.time() - 1000)
+    old = rt.signer.issue(
+        op="d",
+        kind="drive",
+        target={"i": "F1"},
+        person="p",
+        token="t",
+        token_expires=FAR,
+        ttl=300,
+        now=time.time() - 1000,
+    )
     assert client.get(f"/d/{old}").status_code == 403
 
 
@@ -177,9 +226,12 @@ def test_a_compressed_answer_reaches_the_sandbox_as_the_real_file(rt, graph, cli
     # encoded bytes on, so curl without --compressed saved a gzip file. Identity is asked for, and an
     # encoded answer is decoded before it leaves.
     import gzip
+
     body = b"hello text " * 200
     graph.on("GET", "/me/drive/items/F1/content", None, status=302, headers={"Location": BLOB})
-    graph.on("GET", re.escape(BLOB), gzip.compress(body), headers={"content-type": "text/plain", "content-encoding": "gzip"})
+    graph.on(
+        "GET", re.escape(BLOB), gzip.compress(body), headers={"content-type": "text/plain", "content-encoding": "gzip"}
+    )
     tok = issue(rt, op="d", kind="drive", target={"i": "F1", "n": "t.txt"})
     with client.stream("GET", f"/d/{tok}") as r:
         raw = b"".join(r.iter_raw())
@@ -190,9 +242,15 @@ def test_a_compressed_answer_reaches_the_sandbox_as_the_real_file(rt, graph, cli
 
 def test_a_compressed_part_of_a_file_is_refused_rather_than_mislabelled(rt, graph, client):
     import gzip
+
     graph.on("GET", "/me/drive/items/F1/content", None, status=302, headers={"Location": BLOB})
-    graph.on("GET", re.escape(BLOB), gzip.compress(b"ello"), status=206,
-             headers={"content-encoding": "gzip", "content-range": "bytes 1-4/11"})
+    graph.on(
+        "GET",
+        re.escape(BLOB),
+        gzip.compress(b"ello"),
+        status=206,
+        headers={"content-encoding": "gzip", "content-range": "bytes 1-4/11"},
+    )
     tok = issue(rt, op="d", kind="drive", target={"i": "F1"})
     r = client.get(f"/d/{tok}", headers={"Range": "bytes=1-4"})
     assert r.status_code == 502 and "Range" in r.json()["error"]
@@ -208,6 +266,7 @@ def test_a_refused_link_says_to_ask_for_a_new_one_and_nothing_more(rt, graph, cl
 
 
 # -- an upload link moves one file, once --------------------------------------------------------
+
 
 def test_an_upload_link_is_used_once(rt, graph, client):
     put_route(graph, "/me/drive/items/P1:/a.txt:/content")
@@ -238,6 +297,7 @@ def test_a_second_upload_on_a_link_already_receiving_one_is_refused(rt, graph, c
 
 def test_uploads_past_the_spool_budget_wait_and_are_not_saved(rt, graph, client, monkeypatch):
     from m365_mcp.links import routes
+
     put_route(graph, "/me/drive/items/P1:/a.txt:/content")
     monkeypatch.setattr(routes, "SPOOL", routes.SpoolBudget(100))
     tok = issue(rt, op="u", kind="drive_upload", target={"p": "P1", "n": "a.txt", "c": "fail"}, max_bytes=1000)
@@ -253,6 +313,7 @@ def test_an_upload_the_disk_cannot_hold_gives_its_bytes_back_and_says_so(rt, gra
     import tempfile
 
     from m365_mcp.links import routes
+
     put_route(graph, "/me/drive/items/P1:/a.txt:/content")
     monkeypatch.setattr(routes, "SPOOL", routes.SpoolBudget(1000))
     spools = []
@@ -264,6 +325,7 @@ def test_an_upload_the_disk_cannot_hold_gives_its_bytes_back_and_says_so(rt, gra
 
         def write(self, b):
             raise OSError(errno.ENOSPC, "No space left on device")
+
     monkeypatch.setattr(routes.tempfile, "SpooledTemporaryFile", Full)
     tok = issue(rt, op="u", kind="drive_upload", target={"p": "P1", "n": "a.txt", "c": "fail"}, max_bytes=1000)
     r = client.put(f"/u/{tok}", content=b"x" * 10)
@@ -276,6 +338,7 @@ async def test_an_upload_body_that_stalls_is_cut_off(monkeypatch):
     import asyncio
 
     from m365_mcp.links import routes
+
     monkeypatch.setattr(routes, "BODY_IDLE_TIMEOUT", 0.05)
 
     class Stalled:
@@ -290,6 +353,7 @@ async def test_an_upload_body_that_stalls_is_cut_off(monkeypatch):
 
 # -- the upstream stream is released whatever the client does ----------------------------------
 
+
 class _Counted(httpx.AsyncByteStream):
     def __init__(self, data: bytes) -> None:
         self.data, self.reads, self.closed = data, 0, False
@@ -297,7 +361,7 @@ class _Counted(httpx.AsyncByteStream):
     async def __aiter__(self):
         for i in range(0, len(self.data), 4):
             self.reads += 1
-            yield self.data[i:i + 4]
+            yield self.data[i : i + 4]
 
     async def aclose(self) -> None:
         self.closed = True
@@ -305,8 +369,13 @@ class _Counted(httpx.AsyncByteStream):
 
 def _upstream(graph, body: bytes) -> _Counted:
     stream = _Counted(body)
-    graph.on("GET", "/me/drive/items/F1/content", lambda s: httpx.Response(
-        200, stream=stream, headers={"content-type": "text/plain", "content-length": str(len(body))}))
+    graph.on(
+        "GET",
+        "/me/drive/items/F1/content",
+        lambda s: httpx.Response(
+            200, stream=stream, headers={"content-type": "text/plain", "content-length": str(len(body))}
+        ),
+    )
     return stream
 
 
@@ -320,9 +389,20 @@ def test_head_answers_the_headers_without_pulling_the_file(rt, graph, client):
 def _scope(tok: str, spec: str) -> dict:
     # 2.3: Starlette watches for the disconnect in a task group and cancels the body when it comes, as
     # under uvicorn; 2.4: it learns of the client leaving only from a failed send.
-    return {"type": "http", "asgi": {"version": "3.0", "spec_version": spec}, "http_version": "1.1",
-            "method": "GET", "scheme": "https", "path": f"/d/{tok}", "raw_path": f"/d/{tok}".encode(),
-            "root_path": "", "query_string": b"", "headers": [], "server": ("links", 443), "client": ("c", 1)}
+    return {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": spec},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": f"/d/{tok}",
+        "raw_path": f"/d/{tok}".encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [],
+        "server": ("links", 443),
+        "client": ("c", 1),
+    }
 
 
 @pytest.mark.parametrize("spec", ["2.3", "2.4"])
@@ -336,6 +416,7 @@ async def test_a_client_gone_before_the_first_chunk_still_releases_the_upstream(
 
     async def send(message):
         raise OSError("the client is gone")  # before the response could even start
+
     with contextlib.suppress(Exception):
         await links_app()(scope, receive, send)
     assert stream.reads == 0 and stream.closed
@@ -361,8 +442,11 @@ class _Hanging(httpx.AsyncByteStream):
 @pytest.mark.parametrize("spec", ["2.3", "2.4"])
 async def test_a_client_gone_mid_stream_still_releases_the_upstream(rt, graph, spec):
     stream = _Hanging()
-    graph.on("GET", "/me/drive/items/F1/content", lambda s: httpx.Response(
-        200, stream=stream, headers={"content-type": "text/plain"}))
+    graph.on(
+        "GET",
+        "/me/drive/items/F1/content",
+        lambda s: httpx.Response(200, stream=stream, headers={"content-type": "text/plain"}),
+    )
     tok = issue(rt, op="d", kind="drive", target={"i": "F1"})
     started = asyncio.Event()
 
@@ -383,18 +467,29 @@ async def test_a_client_gone_mid_stream_still_releases_the_upstream(rt, graph, s
 
 # -- throttling reaches the sandbox as throttling ---------------------------------------------
 
+
 @pytest.mark.parametrize("status", [429, 503])
 def test_a_throttled_download_is_passed_on_with_its_wait(rt, graph, client, status):
-    graph.on("GET", "/me/drive/items/F1/content", {"error": {"code": "TooManyRequests"}}, status=status,
-             headers={"Retry-After": "7"})
+    graph.on(
+        "GET",
+        "/me/drive/items/F1/content",
+        {"error": {"code": "TooManyRequests"}},
+        status=status,
+        headers={"Retry-After": "7"},
+    )
     r = client.get(f"/d/{issue(rt, op='d', kind='drive', target={'i': 'F1'})}")
     assert r.status_code == status and r.headers["retry-after"] == "7" and "7 seconds" in r.json()["error"]
 
 
 @pytest.mark.parametrize("status", [429, 503])
 def test_a_throttled_upload_is_passed_on_with_its_wait(rt, graph, client, status):
-    graph.on("PUT", re.escape("/me/drive/items/P1:/a.txt:/content"), {"error": {"code": "TooManyRequests"}},
-             status=status, headers={"Retry-After": "7"})
+    graph.on(
+        "PUT",
+        re.escape("/me/drive/items/P1:/a.txt:/content"),
+        {"error": {"code": "TooManyRequests"}},
+        status=status,
+        headers={"Retry-After": "7"},
+    )
     tok = issue(rt, op="u", kind="drive_upload", target={"p": "P1", "n": "a.txt", "c": "fail"}, max_bytes=100)
     r = client.put(f"/u/{tok}", content=b"abc")
     assert r.status_code == status and r.headers["retry-after"] == "7" and "7 seconds" in r.json()["error"]
