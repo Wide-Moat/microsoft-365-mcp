@@ -129,18 +129,25 @@ collect_logs() {  # every container's log of every running pod, kept before a ro
   local p c
   snapshot=$((snapshot + 1))
   mkdir -p "$broken/logs"
-  for p in $(k get pod -l app.kubernetes.io/instance="$rel" --field-selector=status.phase=Running \
-    -o jsonpath='{.items[*].metadata.name}'); do
-    for c in stage-keys server; do
-      # Each snapshot is a file of its own: a later one never replaces what an earlier one saw.
-      k logs "$p" -c "$c" >"$broken/logs/$p.$c.$snapshot" 2>"$broken/logerr" \
-        || echo "logs of $p/$c: $(head -1 "$broken/logerr")" >>"$broken/errors"
-      if [ "$(k get pod "$p" -o jsonpath="{.status.containerStatuses[?(@.name==\"$c\")].restartCount}")" -gt 0 ] 2>/dev/null; then
-        k logs "$p" -c "$c" --previous >"$broken/logs/$p.$c.$snapshot.previous" 2>/dev/null \
-          || echo "previous logs of $p/$c could not be read" >>"$broken/errors"
-      fi
-    done
-  done
+  local listed restarted
+  if ! listed=$(k get pod -l app.kubernetes.io/instance="$rel" --field-selector=status.phase=Running \
+    -o json 2>"$broken/logerr"); then
+    echo "pods could not be listed for their logs: $(head -1 "$broken/logerr")" >>"$broken/errors"
+    return
+  fi
+  # Every container the pod has, init containers included, with its restart count: the known-bad run's
+  # pods have no init container, and that absence is itself what check 6 counts.
+  while read -r p c restarted; do
+    # Each snapshot is a file of its own: a later one never replaces what an earlier one saw.
+    k logs "$p" -c "$c" >"$broken/logs/$p.$c.$snapshot" 2>"$broken/logerr" \
+      || echo "logs of $p/$c: $(head -1 "$broken/logerr")" >>"$broken/errors"
+    if [ "$restarted" -gt 0 ]; then
+      k logs "$p" -c "$c" --previous >"$broken/logs/$p.$c.$snapshot.previous" 2>"$broken/logerr" \
+        || echo "previous logs of $p/$c: $(head -1 "$broken/logerr")" >>"$broken/errors"
+    fi
+  done < <(jq -r '.items[] | .metadata.name as $p
+    | ((.status.initContainerStatuses // []) + (.status.containerStatuses // []))[]
+    | "\($p) \(.name) \(.restartCount)"' <<<"$listed")
 }
 
 na "1 an authorization code redeemed on one pod: this server issues none (the gateway signs people in)"

@@ -970,7 +970,7 @@ async def _refuse_while_uploading(c: Call, draft_id: str) -> None:
         busy = await c.rt.signer.draft_busy(c.key, draft_id)
     except StoreUnavailable:
         # Whether an upload is still running cannot be known: sending now could send half a letter.
-        busy = False
+        raise M365Error("state_unavailable", outcome="Nothing was sent; the draft is kept.") from None
     if busy:
         raise invalid(
             "An upload to this draft is still running. Wait for it to finish, then call send_draft "

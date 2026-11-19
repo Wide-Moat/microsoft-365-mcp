@@ -13,10 +13,10 @@ on:
 permissions:
   contents: read
 
-# One release at a time, whatever its tag: two patch releases of one minor version both move <x.y>, and
-# the newest must be the one left there.
+# One publication per tag; releases of different tags may run at once (a shared group would keep one
+# pending run and cancel the others). <x.y> is set to the newest <x.y.z> by whichever finishes last.
 concurrency:
-  group: publish
+  group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -133,15 +133,14 @@ jobs:
           skopeo copy --all --preserve-digests --digestfile /tmp/digest oci-archive:/tmp/image.tar "docker://$IMAGE:$v"
           digest=$(cat /tmp/digest)
           case "$digest" in sha256:*) ;; *) echo "no digest after push: ${digest}"; exit 1;; esac
-          # <x.y> follows the newest <x.y.z> only: a re-run or a late older patch release never moves it back.
-          newest=$(skopeo list-tags "docker://$IMAGE" | jq -r --arg mm "${v%.*}" \
-            '.Tags[] | select(test("^[0-9]+[.][0-9]+[.][0-9]+$")) | select((split(".")[0:2] | join(".")) == $mm)' \
-            | sort -V | tail -1)
-          if [ "$newest" = "$v" ]; then
-            skopeo copy --all --preserve-digests "docker://$IMAGE@$digest" "docker://$IMAGE:${v%.*}"
-          else
-            echo "${v%.*} stays on ${newest}, newer than ${v}"
-          fi
+          # <x.y> points at the newest <x.y.z> there is, whatever this release is: releases finishing in any
+          # order, or a re-run of an older one, leave it on the newest.
+          tags=$(skopeo list-tags "docker://$IMAGE" | jq -r --arg mm "${v%.*}" \
+            '.Tags[] | select(test("^[0-9]+[.][0-9]+[.][0-9]+$")) | select((split(".")[0:2] | join(".")) == $mm)')
+          grep -qxF "$v" <<<"$tags" || { echo "the registry does not list ${v} just pushed"; exit 1; }
+          newest=$(sort -V <<<"$tags" | tail -1)
+          skopeo copy --all --preserve-digests "docker://$IMAGE:$newest" "docker://$IMAGE:${v%.*}"
+          echo "${v%.*} -> ${newest}"
           echo "what an installation should pin: $IMAGE@$digest"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
