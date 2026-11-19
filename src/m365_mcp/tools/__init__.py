@@ -1,14 +1,17 @@
 """Importing this package registers every tool."""
-from m365_mcp.tools import account  # noqa: F401
-from m365_mcp.tools import autoreply  # noqa: F401
-from m365_mcp.tools import bookings  # noqa: F401
-from m365_mcp.tools import calendar  # noqa: F401
-from m365_mcp.tools import contacts  # noqa: F401
-from m365_mcp.tools import excel  # noqa: F401
-from m365_mcp.tools import files  # noqa: F401
-from m365_mcp.tools import lists  # noqa: F401
-from m365_mcp.tools import mail  # noqa: F401
-from m365_mcp.tools import notes  # noqa: F401
-from m365_mcp.tools import recordings  # noqa: F401
-from m365_mcp.tools import tasks  # noqa: F401
-from m365_mcp.tools import teams  # noqa: F401
+
+from m365_mcp.tools import (
+    account,  # noqa: F401
+    autoreply,  # noqa: F401
+    bookings,  # noqa: F401
+    calendar,  # noqa: F401
+    contacts,  # noqa: F401
+    excel,  # noqa: F401
+    files,  # noqa: F401
+    lists,  # noqa: F401
+    mail,  # noqa: F401
+    notes,  # noqa: F401
+    recordings,  # noqa: F401
+    tasks,  # noqa: F401
+    teams,  # noqa: F401
+)

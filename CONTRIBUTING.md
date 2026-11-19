@@ -17,7 +17,13 @@ uv venv -p 3.12 .venv && uv pip install -p .venv -r requirements-test.lock && uv
 .venv/bin/python scripts/mutation_check.py     # every safety rule fails a test when removed
 .venv/bin/python scripts/refusal_map.py        # every Must refuse row names an existing test
 .venv/bin/python scripts/refusal_evidence.py   # and that test fails with the row's guard removed
+.venv/bin/ruff format --check src tests scripts && .venv/bin/ruff check src tests scripts
+scripts/state-contract.sh                      # the state store on real Redis, Valkey, Sentinel (Docker)
+scripts/state-contract.sh scripts/mutation_check.py --stores   # every store script's guard
 ```
+
+The chart e2e (`scripts/chart-e2e.sh`, a kind cluster with Valkey behind Sentinel) runs in CI on
+GitHub-hosted runners; `.github/workflows/validate.yml` shows how to run it on a kind cluster of your own.
 
 - **Test first.** A behaviour change comes with a test that fails without it.
 - **A refusal is a row and a test.** Every "must refuse" in [`docs/requirements.md`](docs/requirements.md)

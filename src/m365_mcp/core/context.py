@@ -25,6 +25,7 @@ from m365_mcp.graph.errors import GraphError, to_person_error
 from m365_mcp.identity import Person, current_person
 from m365_mcp.links.store import LinksFull
 from m365_mcp.links.tokens import LinkSigner
+from m365_mcp.state.store import StoreUnavailable
 
 
 @dataclass
@@ -96,8 +97,8 @@ class Call:
             if not scope_granted(s, self.person.scopes):
                 raise M365Error("missing_permission", permission=s)
 
-    def guard(self, **kw: Any) -> dict:
-        return self.rt.guard.check(self.key, allowed_domains=self.rt.settings.allowed_recipient_domains, **kw)
+    async def guard(self, **kw: Any) -> dict:
+        return await self.rt.guard.check(self.key, allowed_domains=self.rt.settings.allowed_recipient_domains, **kw)
 
     def cursor_out(self, state: dict | None) -> str | None:
         return self.rt.cursors.make(self.tool, self.key, state) if state else None
@@ -105,18 +106,35 @@ class Call:
     def cursor_in(self, cursor: str | None) -> dict | None:
         return self.rt.cursors.read(self.tool, self.key, cursor) if cursor else None
 
-    def link(self, *, op: str, kind: str, target: dict[str, Any], max_bytes: int | None = None,
-             content_type: str | None = None) -> str:
+    async def link(
+        self,
+        *,
+        op: str,
+        kind: str,
+        target: dict[str, Any],
+        max_bytes: int | None = None,
+        content_type: str | None = None,
+    ) -> str:
         signer = self.rt.signer
         if signer is None:
             raise M365Error("links_unavailable")
         ttl = LINK_TTL_DOWNLOAD if op == "d" else LINK_TTL_UPLOAD
         try:
-            value = signer.issue(op=op, kind=kind, target=target, person=self.key, token=self.person.token,
-                                 token_expires=self.person.expires, ttl=ttl, max_bytes=max_bytes,
-                                 content_type=content_type)
+            value = await signer.issue(
+                op=op,
+                kind=kind,
+                target=target,
+                person=self.key,
+                token=self.person.token,
+                token_expires=self.person.expires,
+                ttl=ttl,
+                max_bytes=max_bytes,
+                content_type=content_type,
+            )
         except LinksFull:
             raise M365Error("links_full") from None
+        except StoreUnavailable:
+            raise M365Error("state_unavailable", outcome="No link was made.") from None
         return f"{self.rt.settings.links_base_url}/{op}/{value}"
 
 
@@ -142,8 +160,12 @@ async def learn_zone(graph: Graph) -> None:
     """Map Outlook's Windows zone names to IANA ones by asking Graph for both lists. A zone that still
     cannot be named is shown in UTC, with the offset saying so, rather than shifted silently."""
     try:
-        win = await graph.get("/me/outlook/supportedTimeZones(TimeZoneStandard=microsoft.graph.timeZoneStandard'Windows')")
-        iana = await graph.get("/me/outlook/supportedTimeZones(TimeZoneStandard=microsoft.graph.timeZoneStandard'Iana')")
+        win = await graph.get(
+            "/me/outlook/supportedTimeZones(TimeZoneStandard=microsoft.graph.timeZoneStandard'Windows')"
+        )
+        iana = await graph.get(
+            "/me/outlook/supportedTimeZones(TimeZoneStandard=microsoft.graph.timeZoneStandard'Iana')"
+        )
     except GraphError:
         return
     by_display = {z.get("displayName"): z.get("alias") for z in iana.get("value", [])}

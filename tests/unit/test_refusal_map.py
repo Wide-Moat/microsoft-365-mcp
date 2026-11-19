@@ -39,8 +39,11 @@ def test_the_documents_hold_a_plausible_number_of_rows(parsed):
     # each holds at least one row.
     assert parsed.tables > 0 and parsed.headers_seen == parsed.tables
     assert len(parsed.rows) >= parsed.tables
-    assert {r.doc for r in parsed.rows} >= {"docs/requirements.md", "docs/components/identity.md",
-                                           "docs/components/guard.md"}
+    assert {r.doc for r in parsed.rows} >= {
+        "docs/requirements.md",
+        "docs/components/identity.md",
+        "docs/components/guard.md",
+    }
 
 
 def test_every_mapped_test_has_exactly_one_guard_mutation(parsed):
@@ -51,6 +54,7 @@ def test_every_mapped_test_has_exactly_one_guard_mutation(parsed):
 
 
 # -- the checker refuses what it should ------------------------------------------------------
+
 
 def _doc(tmp_path, text):
     p = tmp_path / "requirements.md"
@@ -91,13 +95,16 @@ def test_no_tables_at_all_is_a_problem(tmp_path):
 
 
 def test_a_header_the_parser_cannot_read_is_a_problem(tmp_path):
-    problems = refusal_map.check(_doc(tmp_path, GOOD + "\n| MUST REFUSE | Told | Test |\n|---|---|---|\n| Q | r | |\n"),
-                                 {"test_a.py::test_x"})
+    problems = refusal_map.check(
+        _doc(tmp_path, GOOD + "\n| MUST REFUSE | Told | Test |\n|---|---|---|\n| Q | r | |\n"), {"test_a.py::test_x"}
+    )
     assert any("form the parser does not read" in p for p in problems)
 
 
 def test_an_indented_table_is_read_like_any_other(tmp_path):
-    indented = "\n".join("  " + line for line in "| Must refuse | Told | Test |\n|---|---|---|\n| Y | z | |".split("\n"))
+    indented = "\n".join(
+        "  " + line for line in "| Must refuse | Told | Test |\n|---|---|---|\n| Y | z | |".split("\n")
+    )
     parsed = _doc(tmp_path, GOOD + "\n" + indented + "\n")
     assert parsed.tables == 2
     assert any("no test named" in p for p in refusal_map.check(parsed, {"test_a.py::test_x"}))

@@ -54,8 +54,9 @@ def annotations(s: ToolSpec) -> ToolAnnotations:
 
 class M365Server(MCPServer):
     def __init__(self, settings: Settings) -> None:
-        super().__init__(name="m365", title="Microsoft 365", version=__version__, instructions=INSTRUCTIONS,
-                         log_level="WARNING")
+        super().__init__(
+            name="m365", title="Microsoft 365", version=__version__, instructions=INSTRUCTIONS, log_level="WARNING"
+        )
         # Not `self.settings`: that is the SDK's own, and streamable_http_app reads it.
         self.installation = settings
         self.specs: dict[str, ToolSpec] = {}
@@ -63,8 +64,14 @@ class M365Server(MCPServer):
         for spec in enabled(settings.areas, settings.switches):
             self.specs[spec.name] = spec
             self.params[spec.name] = frozenset(inspect.signature(spec.fn).parameters)
-            self.add_tool(spec.fn, name=spec.name, title=spec.title, description=spec.description,
-                          annotations=annotations(spec), structured_output=True)
+            self.add_tool(
+                spec.fn,
+                name=spec.name,
+                title=spec.title,
+                description=spec.description,
+                annotations=annotations(spec),
+                structured_output=True,
+            )
 
     def _visible(self, name: str) -> bool:
         spec = self.specs.get(name)
@@ -85,10 +92,16 @@ class M365Server(MCPServer):
         off: dict[str, M365Error] = {}
         for param, (kind, gate) in spec.gates.items():
             if kind == "area":
-                if gate not in self.installation.areas or gate not in live.areas or (narrowed is not None and gate not in narrowed):
+                if (
+                    gate not in self.installation.areas
+                    or gate not in live.areas
+                    or (narrowed is not None and gate not in narrowed)
+                ):
                     off[param] = M365Error("area_off", area=gate)
             elif gate not in self.installation.switches or gate not in live.switches:
-                off[param] = M365Error("unsupported", reason=SWITCH_OFF.get(gate, f"{param} is switched off on this server."))
+                off[param] = M365Error(
+                    "unsupported", reason=SWITCH_OFF.get(gate, f"{param} is switched off on this server.")
+                )
         return off
 
     async def list_tools(self):  # type: ignore[override]
@@ -111,17 +124,22 @@ class M365Server(MCPServer):
         name = params.name
         if not self._visible(name):
             area = self.specs[name].area if name in self.specs else "requested"
-            return CallToolResult(content=[TextContent(type="text", text=M365Error("area_off", area=area).text)],
-                                  is_error=True)
+            return CallToolResult(
+                content=[TextContent(type="text", text=M365Error("area_off", area=area).text)], is_error=True
+            )
         # The person's word is the JSON boolean and nothing else. Validation is lax ("yes" and 1
         # become True) and the SDK parses a JSON string before validating, so this reads the raw
         # arguments, before either, once for every tool.
         args = params.arguments or {}
         for param in sorted(CONFIRMATION_PARAMS & self.params.get(name, frozenset())):
             if param in args and not isinstance(args[param], bool):
-                refusal = M365Error("invalid", reason=(
-                    f"{param} must be the boolean true, set only when the person explicitly said so; a word, "
-                    "a number or null is not a confirmation. Nothing was done."))
+                refusal = M365Error(
+                    "invalid",
+                    reason=(
+                        f"{param} must be the boolean true, set only when the person explicitly said so; a word, "
+                        "a number or null is not a confirmation. Nothing was done."
+                    ),
+                )
                 log_call(name, result="confirmation_not_boolean")
                 return CallToolResult(content=[TextContent(type="text", text=refusal.text)], is_error=True)
         # A gated parameter sent while it is off is refused before the tool runs; sent as off
@@ -134,9 +152,13 @@ class M365Server(MCPServer):
         # less than the model believes it asked for: a series becomes one event, a file is not attached.
         unknown = sorted(set(params.arguments or {}) - self.params.get(name, frozenset()))
         if unknown:
-            refusal = M365Error("unsupported", reason=(
-                f"{name} has no argument {', '.join(unknown)}. Nothing was done: leave it out, and if it asked "
-                "for something, that is not supported here."))
+            refusal = M365Error(
+                "unsupported",
+                reason=(
+                    f"{name} has no argument {', '.join(unknown)}. Nothing was done: leave it out, and if it asked "
+                    "for something, that is not supported here."
+                ),
+            )
             log_call(name, result="unknown_argument")
             return CallToolResult(content=[TextContent(type="text", text=refusal.text)], is_error=True)
         with tool_timer(name, self.specs[name].area) as rec:
@@ -170,7 +192,7 @@ class M365Server(MCPServer):
 # What an argument error adds for one tool's argument: a refusal that is a design choice, not a typo.
 _ARGUMENT_HINTS = {
     ("update_messages", "action"): "Permanent deletion is deliberately not offered: delete moves messages to "
-                                   "Deleted Items, and move brings them back.",
+    "Deleted Items, and move brings them back.",
 }
 
 
@@ -189,9 +211,19 @@ def arguments_sentence(e: ValidationError, tool: str | None = None) -> str:
             parts.append(f"{field} is not an argument of this tool")
         else:
             parts.append(f"{field}: {str(err.get('msg', 'not valid')).rstrip('.').lower()}")
-    hints = [h for (t, f), h in _ARGUMENT_HINTS.items()
-             if t == tool and any(err.get("loc", ())[:1] == (f,) and err.get("type") == "literal_error" for err in e.errors())]
-    return "The arguments are not valid: " + "; ".join(parts) + ". " + "".join(h + " " for h in hints) + "Nothing was done."
+    hints = [
+        h
+        for (t, f), h in _ARGUMENT_HINTS.items()
+        if t == tool
+        and any(err.get("loc", ())[:1] == (f,) and err.get("type") == "literal_error" for err in e.errors())
+    ]
+    return (
+        "The arguments are not valid: "
+        + "; ".join(parts)
+        + ". "
+        + "".join(h + " " for h in hints)
+        + "Nothing was done."
+    )
 
 
 class _Sentence(ToolError):

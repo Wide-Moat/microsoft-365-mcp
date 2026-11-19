@@ -1,9 +1,9 @@
 """QA round 4: what a model read in the mail, Teams, tasks and notes results, and what it did not understand."""
 
 import pytest
+from people import me
 
 from m365_mcp.core.html import html_to_text
-from people import me
 
 CHAT = "19:abc@thread.v2"
 
@@ -15,8 +15,13 @@ def _me(graph):
 
 # -- M19: a clamped limit says so in a sentence ----------------------------------------------
 
+
 async def test_a_limit_above_the_cap_is_clamped_and_the_result_says_how_to_continue(graph, invoke):
-    graph.on("GET", "/me/messages", {"value": [], "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/messages?$skiptoken=abc"})
+    graph.on(
+        "GET",
+        "/me/messages",
+        {"value": [], "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/messages?$skiptoken=abc"},
+    )
     r = await invoke("list_messages", limit=50)
     assert not r.error, r.text
     assert graph.calls("GET", "/me/messages")[0].params["$top"] == "25"
@@ -34,9 +39,11 @@ async def test_a_limit_within_the_cap_carries_no_note(graph, invoke):
 # -- M04/M09: thread_cut explains itself, and the quoted part can be had ---------------------
 
 _REPLY = {
-    "id": "m1", "from": {"emailAddress": {"address": "bo@x.test"}},
+    "id": "m1",
+    "from": {"emailAddress": {"address": "bo@x.test"}},
     "uniqueBody": {"content": "<p>New reply</p>"},
-    "body": {"content": "<html><body><p>New reply</p><hr><p>QUOTED OLD</p></body></html>"}}
+    "body": {"content": "<html><body><p>New reply</p><hr><p>QUOTED OLD</p></body></html>"},
+}
 
 
 async def test_thread_cut_says_what_was_left_out_and_how_to_read_it(graph, invoke):
@@ -58,12 +65,16 @@ async def test_include_quoted_keeps_the_history_in_the_body(graph, invoke):
 
 # -- M04/M17: Graph's attachment size is not the file's size ---------------------------------
 
+
 async def test_attachment_size_is_named_for_what_it_measures(graph, invoke):
     # Measured live (docs/graph-live-findings.md, attachment_size_vs_real_bytes): a 55-byte file
     # answers 317. The number includes the message's own wrapping, so it must not be called the size.
     graph.on("GET", "/me/messages/m1", {"id": "m1", "body": {"content": ""}})
-    graph.on("GET", "/me/messages/m1/attachments", {"value": [
-        {"@odata.type": "#microsoft.graph.fileAttachment", "id": "a1", "name": "n.txt", "size": 317}]})
+    graph.on(
+        "GET",
+        "/me/messages/m1/attachments",
+        {"value": [{"@odata.type": "#microsoft.graph.fileAttachment", "id": "a1", "name": "n.txt", "size": 317}]},
+    )
     r = await invoke("get_message", id="m1", include_attachments=True, include_body=False)
     [a] = r.data["attachments"]
     assert a["size_incl_overhead"] == 317 and "approx_size" not in a and "size" not in a
@@ -79,11 +90,13 @@ async def test_a_drafts_attachment_size_is_named_the_same_way(graph, invoke):
 
 # -- M07: a table keeps its rows ---------------------------------------------------------------
 
+
 def test_a_table_reads_as_rows_with_closed_cells():
-    html = ("<table><tr><th>Item</th><th>Qty</th></tr>"
-            "<tr><td>Widgets</td><td>3</td></tr><tr><td>Bolts</td><td>12</td></tr></table>")
-    assert html_to_text(html).splitlines() == [
-        "| Item | Qty |", "| --- | --- |", "| Widgets | 3 |", "| Bolts | 12 |"]
+    html = (
+        "<table><tr><th>Item</th><th>Qty</th></tr>"
+        "<tr><td>Widgets</td><td>3</td></tr><tr><td>Bolts</td><td>12</td></tr></table>"
+    )
+    assert html_to_text(html).splitlines() == ["| Item | Qty |", "| --- | --- |", "| Widgets | 3 |", "| Bolts | 12 |"]
 
 
 def test_a_table_without_a_header_row_gets_no_separator():
@@ -102,6 +115,7 @@ def test_a_hidden_cell_is_not_counted_in_the_row():
 
 # -- S05: the action error says permanent deletion is left out on purpose ---------------------
 
+
 async def test_an_unknown_action_says_permanent_deletion_is_not_offered(graph, invoke):
     r = await invoke("update_messages", ids=["m1"], action="purge")
     assert r.error
@@ -116,6 +130,7 @@ async def test_other_argument_errors_do_not_carry_that_hint(graph, invoke):
 
 
 # -- T05/T06: an empty read says why, and the order is stated ---------------------------------
+
 
 def _channels(graph):
     graph.on("GET", "/me/joinedTeams", {"value": [{"id": "t1", "displayName": "Ops"}]})
@@ -146,9 +161,21 @@ async def test_an_empty_chat_says_so(graph, invoke):
 
 async def test_a_page_with_messages_has_no_empty_note(graph, invoke):
     graph.on("GET", f"/chats/{CHAT}", {"id": CHAT, "chatType": "group", "topic": "T", "members": []})
-    graph.on("GET", f"/chats/{CHAT}/messages", {"value": [{
-        "id": "x", "messageType": "message", "createdDateTime": "2026-10-20T10:00:00Z",
-        "from": {"user": {"id": "u", "displayName": "Bo"}}, "body": {"contentType": "text", "content": "hi"}}]})
+    graph.on(
+        "GET",
+        f"/chats/{CHAT}/messages",
+        {
+            "value": [
+                {
+                    "id": "x",
+                    "messageType": "message",
+                    "createdDateTime": "2026-10-20T10:00:00Z",
+                    "from": {"user": {"id": "u", "displayName": "Bo"}},
+                    "body": {"contentType": "text", "content": "hi"},
+                }
+            ]
+        },
+    )
     r = await invoke("get_conversation", chat=CHAT)
     assert "empty" not in r.data
 
@@ -193,8 +220,11 @@ async def test_a_channel_continued_by_cursor_is_not_told_nothing_older(graph, in
 
 async def test_a_chat_that_holds_only_system_events_does_not_claim_to_have_no_messages(graph, invoke):
     graph.on("GET", f"/chats/{CHAT}", {"id": CHAT, "chatType": "group", "topic": "T", "members": []})
-    graph.on("GET", f"/chats/{CHAT}/messages", {"value": [
-        {"id": "sys", "messageType": "systemEventMessage", "body": {"content": "<systemEventMessage/>"}}]})
+    graph.on(
+        "GET",
+        f"/chats/{CHAT}/messages",
+        {"value": [{"id": "sys", "messageType": "systemEventMessage", "body": {"content": "<systemEventMessage/>"}}]},
+    )
     r = await invoke("get_conversation", chat=CHAT)
     assert r.data["messages"] == []
     assert "system events" in r.data["empty"] and "has none" in r.data["empty"]
@@ -205,8 +235,14 @@ async def test_find_meeting_times_with_a_high_limit_does_not_mention_a_cursor(gr
 
     many_people(graph, [("Anna", "anna@x.test"), ("Bo", "bo@x.test")])
     graph.on("POST", "/me/findMeetingTimes", {"meetingTimeSuggestions": [SUGGESTION]})
-    r = await invoke("find_meeting_times", people=["anna@x.test", "bo@x.test"], duration_minutes=60,
-                     start="2026-10-23 09:00", end="2026-10-30 09:00", limit=50)
+    r = await invoke(
+        "find_meeting_times",
+        people=["anna@x.test", "bo@x.test"],
+        duration_minutes=60,
+        start="2026-10-23 09:00",
+        end="2026-10-30 09:00",
+        limit=50,
+    )
     assert not r.error, r.text
     assert r.data["limit_clamped_to"] == 25
     assert "cursor" not in r.text and "limit_note" not in r.data
@@ -219,6 +255,7 @@ async def test_a_list_that_ends_has_no_note_about_a_cursor(graph, invoke):
 
 
 # -- N02/N06: the words a person uses lead to the argument -------------------------------------
+
 
 async def _props(server, name):
     return next(t for t in await server.list_tools() if t.name == name).input_schema["properties"]
@@ -234,6 +271,7 @@ async def test_save_note_page_says_text_makes_no_lists(server):
 
 
 # -- M07 review: a cell stays on one line and one cell ---------------------------------------
+
 
 def test_a_pipe_in_a_cell_is_escaped():
     assert html_to_text("<table><tr><td>a|b</td><td>c</td></tr></table>") == "| a\\|b | c |"
@@ -259,14 +297,17 @@ def test_each_table_has_its_own_header_separator():
 
 # -- Outlook's own table markup keeps its rows --------------------------------
 
+
 def _outlook_cell(text, tag="td"):
-    return (f'<{tag} width=200 valign=top style="width:150.0pt;border:solid windowtext 1.0pt;padding:0cm 5.4pt">'
-            f'<p class=MsoNormal><span style="font-size:11.0pt;font-family:Calibri">{text}<o:p></o:p></span></p></{tag}>')
+    return (
+        f'<{tag} width=200 valign=top style="width:150.0pt;border:solid windowtext 1.0pt;padding:0cm 5.4pt">'
+        f'<p class=MsoNormal><span style="font-size:11.0pt;font-family:Calibri">{text}<o:p></o:p></span></p></{tag}>'
+    )
 
 
 def _outlook_table(*rows):
     body = "".join("<tr style='height:15.0pt'>\n" + "\n".join(r) + "\n</tr>\n" for r in rows)
-    return f'<div class=WordSection1><p class=MsoNormal>Plan<o:p></o:p></p>\n<table class=MsoTableGrid border=1>\n{body}</table>\n</div>'
+    return f"<div class=WordSection1><p class=MsoNormal>Plan<o:p></o:p></p>\n<table class=MsoTableGrid border=1>\n{body}</table>\n</div>"
 
 
 def test_cells_with_paragraphs_spans_and_newlines_between_them_stay_on_their_row():
@@ -275,13 +316,15 @@ def test_cells_with_paragraphs_spans_and_newlines_between_them_stay_on_their_row
 
 
 def test_outlook_header_cells_get_the_separator_row():
-    html = _outlook_table([_outlook_cell("Task", "th"), _outlook_cell("Owner", "th")], [_outlook_cell("Ship"), _outlook_cell("Bo")])
+    html = _outlook_table(
+        [_outlook_cell("Task", "th"), _outlook_cell("Owner", "th")], [_outlook_cell("Ship"), _outlook_cell("Bo")]
+    )
     assert html_to_text(html).splitlines()[2:] == ["| Task | Owner |", "| --- | --- |", "| Ship | Bo |"]
 
 
 def test_a_nested_table_and_a_multi_paragraph_cell_stay_one_line_each():
     inner = "<table>\n<tr>\n<td>x</td>\n<td>y</td>\n</tr>\n</table>"
-    html = ("<table>\n<tr>\n<td><p>One</p>\n<p>Two</p></td>\n<td>" + inner + "</td>\n</tr>\n</table>")
+    html = "<table>\n<tr>\n<td><p>One</p>\n<p>Two</p></td>\n<td>" + inner + "</td>\n</tr>\n</table>"
     lines = [line for line in html_to_text(html).splitlines() if line]
     assert lines[0].startswith("| One Two |")
     assert not any(line == "|" for line in lines)

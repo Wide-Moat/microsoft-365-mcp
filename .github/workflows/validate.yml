@@ -4,6 +4,8 @@ name: validate
 
 on:
   workflow_dispatch:
+  # publish.yml runs every check here on the release tag before anything is published.
+  workflow_call:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
@@ -30,6 +32,10 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements-test.lock
           python -m pip install --no-deps -e .
+      - name: format and lint
+        run: |
+          python -m ruff format --check src tests scripts
+          python -m ruff check src tests scripts
       - name: the tests pass
         run: python -m pytest -q -p no:cacheprovider --junitxml=report.xml
       - name: the suite is not empty and every collected test ran
@@ -155,10 +161,127 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: pipx run yamllint==1.35.1 --strict .
 
-  image:
+  # The state store contract against real Redis, Valkey and both behind Sentinel (scripts/state-contract.sh
+  # starts them in Docker), then every mutation of the store scripts, which only real servers can catch.
+  state:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: the image builds
-        run: docker build -t m365-mcp:ci .
+      - name: the contract on every real store
+        run: scripts/state-contract.sh -m pytest -q -p no:cacheprovider -rs tests/state
+      - name: every store script's guard is caught when it is broken
+        run: scripts/state-contract.sh scripts/mutation_check.py --stores
+
+  # The chart renders, refuses what it must, and in a kind cluster runs three replicas on Valkey behind
+  # Sentinel: shared allowance and links, failover, the key delivered by the init container, JSON logs,
+  # metrics on their own port, the autoscaler (scripts/chart-e2e.sh counts its own checks). GitHub-hosted
+  # runners only.
+  chart:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: chart, image and package carry one version
+        run: |
+          set -euo pipefail
+          py=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+          init=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/m365_mcp/__init__.py)
+          chart=$(sed -n 's/^version: //p' charts/microsoft-365-mcp/Chart.yaml)
+          app=$(sed -n 's/^appVersion: "\(.*\)"$/\1/p' charts/microsoft-365-mcp/Chart.yaml)
+          echo "pyproject ${py}, package ${init}, chart ${chart}, appVersion ${app}"
+          test -n "$py" && test "$py" = "$init" && test "$py" = "$chart" && test "$py" = "$app"
+          awk -v h="## ${py}:" 'index($0, h) == 1 {found=1} END {exit !found}' CHANGELOG.md
+      - name: tools
+        run: |
+          set -euo pipefail
+          helm version --short && kind version && kubectl version --client=true | head -1
+          curl -fsSL --retry 3 -o /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  /tmp/kubeconform.tar.gz" \
+            | sha256sum -c -
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+      - name: renders valid manifests, and refuses what it must
+        run: |
+          set -euo pipefail
+          c=charts/microsoft-365-mcp
+          ok=(--set key.existingSecret=m365-key --set linksBaseUrl=https://files.example.com
+              --set "state.sentinel.hosts={store-sentinel:26379}" --set state.existingSecret=m365-state)
+          helm lint --strict "$c" "${ok[@]}"
+          helm template t "$c" "${ok[@]}" > rendered.yaml
+          /tmp/kubeconform -strict -summary rendered.yaml
+          grep -q 'name: stage-keys' rendered.yaml
+          # everything optional renders and is valid: autoscaler, ServiceMonitor (its CRD is skipped), Ingress
+          helm template t "$c" "${ok[@]}" --set autoscaling.enabled=true --set autoscaling.inFlightPerPod=20 \
+            --set metrics.serviceMonitor.enabled=true --set ingress.enabled=true --set ingress.className=nginx \
+            --set ingress.tlsSecretName=files-tls --set caBundle.configMap=corp-ca > all.yaml
+          /tmp/kubeconform -strict -summary -skip ServiceMonitor all.yaml
+          python3 - <<'PY'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open("all.yaml")) if d]
+          kinds = sorted(d["kind"] for d in docs)
+          print("rendered:", kinds)
+          for kind in ("Deployment", "Service", "PodDisruptionBudget", "HorizontalPodAutoscaler", "ServiceMonitor",
+                       "Ingress"):
+              assert kind in kinds, f"no {kind}"
+          ingress = next(d for d in docs if d["kind"] == "Ingress")
+          routes = sorted((p["path"], p["backend"]["service"]["port"]["name"])
+                          for rule in ingress["spec"]["rules"] for p in rule["http"]["paths"])
+          assert routes == [("/d/", "links"), ("/u/", "links")], routes  # the links routes and nothing else
+          PY
+          refuses() {
+            want="$1"; shift
+            if out=$(helm template t "$c" "$@" 2>&1); then echo "rendered: $*"; exit 1; fi
+            grep -qF "$want" <<<"$out" || { echo "refused for another reason: $out"; exit 1; }
+            echo "refused as expected: $want"
+          }
+          refuses "key.existingSecret is required" --set linksBaseUrl=https://files.example.com --set replicaCount=1
+          refuses "more than one replica" --set key.existingSecret=k --set linksBaseUrl=https://files.example.com
+          refuses "more than one replica" --set key.existingSecret=k --set linksBaseUrl=https://files.example.com \
+            --set replicaCount=1 --set autoscaling.enabled=true
+          refuses "linksBaseUrl is required" --set key.existingSecret=k --set replicaCount=1
+          refuses "linksBaseUrl is required" --set key.existingSecret=k --set replicaCount=1 \
+            --set linksBaseUrl=http://files.example.com
+          refuses "two different stores" "${ok[@]}" --set state.url=redis://store:6379/0
+          refuses "carries credentials" --set key.existingSecret=k --set linksBaseUrl=https://files.example.com \
+            --set state.url=redis://:secret@store:6379/0
+          refuses "no CPU limit" "${ok[@]}" --set resources.limits.cpu=1
+          refuses "metrics.port must differ" "${ok[@]}" --set metrics.port=8001
+      - name: build the image for the cluster
+        run: docker build -t microsoft-365-mcp:e2e .
+      - name: the image reports the chart's version
+        run: |
+          set -euo pipefail
+          got=$(docker run --rm --entrypoint python microsoft-365-mcp:e2e \
+            -c 'import m365_mcp; print(m365_mcp.__version__)')
+          want=$(sed -n 's/^appVersion: "\(.*\)"$/\1/p' charts/microsoft-365-mcp/Chart.yaml)
+          echo "image ${got}, chart appVersion ${want}"
+          test -n "$want" && test "$got" = "$want"
+      - name: a cluster, with metrics-server for the autoscaler
+        run: |
+          set -euo pipefail
+          kind create cluster --name e2e --wait 120s
+          kind load docker-image microsoft-365-mcp:e2e --name e2e
+          curl -fsSL --retry 3 -o /tmp/metrics-server.yaml \
+            https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
+          echo "ff64d1a13b9ac3b0635f0dd985815fb44c23eed4706c04e5db1daadf6bc0a83b  /tmp/metrics-server.yaml" \
+            | sha256sum -c -
+          kubectl apply -f /tmp/metrics-server.yaml
+          # kind's kubelets serve self-signed certificates
+          kubectl -n kube-system patch deployment metrics-server --type json \
+            -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+          kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
+      - name: the chart in the cluster
+        run: IMAGE=microsoft-365-mcp:e2e scripts/chart-e2e.sh
+      - name: what the cluster saw
+        if: failure()
+        run: |
+          kubectl -n m365-e2e get pods -o wide || true
+          kubectl -n m365-e2e describe pods | tail -80 || true
+          kubectl -n m365-e2e logs -l app.kubernetes.io/instance=e2e --all-containers --tail=60 || true
+          kubectl -n m365-e2e logs valkey-sentinel-0 --tail=40 || true

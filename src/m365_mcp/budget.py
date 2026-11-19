@@ -1,8 +1,8 @@
 """What the catalogue costs the model, measured on the exact tools/list payload.
 
-    python -m m365_mcp.budget            # table for the default configuration
-    python -m m365_mcp.budget --all      # every area and switch on
-    python -m m365_mcp.budget --check    # exit 1 above the manifesto's limits
+python -m m365_mcp.budget            # table for the default configuration
+python -m m365_mcp.budget --all      # every area and switch on
+python -m m365_mcp.budget --check    # exit 1 above the manifesto's limits
 """
 
 from __future__ import annotations
@@ -38,8 +38,13 @@ def catalogue_server(all_on: bool = False):
 
     areas = frozenset(AREAS) if all_on else frozenset(a for a, on in AREAS.items() if on)
     switches = frozenset(SWITCHES) if all_on else frozenset(s for s, on in SWITCHES.items() if on)
-    settings = Settings(areas=areas, switches=switches, sign_keys=(b"k" * 32,), enc_keys=(b"e" * 32,),
-                        links_base_url="https://links.invalid")
+    settings = Settings(
+        areas=areas,
+        switches=switches,
+        sign_keys=(b"k" * 32,),
+        enc_keys=(b"e" * 32,),
+        links_base_url="https://links.invalid",
+    )
     configure(Runtime(settings=settings, signer=None, cursors=Cursors(None)))
     return M365Server(settings)
 
@@ -52,8 +57,10 @@ async def measure(all_on: bool = False) -> dict:
         payload = json.dumps(t.model_dump(by_alias=True, exclude_none=True, mode="json"), separators=(",", ":"))
         rows.append({"tool": t.name, "area": server.specs[t.name].area, "tokens": len(enc.encode(payload))})
     # The total is the whole tools/list payload encoded at once, as the model receives it, not a sum.
-    payload_all = json.dumps([t.model_dump(by_alias=True, exclude_none=True, mode="json") for t in await server.list_tools()],
-                             separators=(",", ":"))
+    payload_all = json.dumps(
+        [t.model_dump(by_alias=True, exclude_none=True, mode="json") for t in await server.list_tools()],
+        separators=(",", ":"),
+    )
     by_area: dict[str, int] = {}
     for r in rows:
         by_area[r["area"]] = by_area.get(r["area"], 0) + r["tokens"]
@@ -75,8 +82,11 @@ def table(m: dict) -> str:
         lines.append(f"| {r['area']} | `{r['tool']}` | {r['tokens']} |")
     lines += ["", "| Area | Tokens |", "|---|---|"]
     lines += [f"| {a} | {n} |" for a, n in sorted(m["areas"].items())]
-    lines += ["", f"**Total: {m['total']} tokens, {len(m['tools'])} tools** "
-                  f"(limits: {LIMIT_TOTAL} total, {LIMIT_AREA} per area, {LIMIT_TOOL} per tool)"]
+    lines += [
+        "",
+        f"**Total: {m['total']} tokens, {len(m['tools'])} tools** "
+        f"(limits: {LIMIT_TOTAL} total, {LIMIT_AREA} per area, {LIMIT_TOOL} per tool)",
+    ]
     return "\n".join(lines)
 
 
@@ -84,8 +94,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--check", action="store_true", help="fail above any limit")
-    ap.add_argument("--check-tools", action="store_true",
-                    help="fail above the per-area and per-tool limits only (the total limit is for the default set)")
+    ap.add_argument(
+        "--check-tools",
+        action="store_true",
+        help="fail above the per-area and per-tool limits only (the total limit is for the default set)",
+    )
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     m = asyncio.run(measure(all_on=a.all))

@@ -148,7 +148,9 @@ Every safety rule has a test, and each test has been seen failing once with its 
 | Unit and contract tests (`pytest`) | Every tool against a recorded fake of Graph: arguments, results, errors, refusals | about 1,700 tests |
 | [Refusal map](docs/requirements.md) | Every "must refuse" row names an existing test | 200 refusal tests |
 | Refusal evidence (`scripts/refusal_evidence.py`) | Each row's guard is removed in turn and its test must fail | every row |
-| Mutation check (`scripts/mutation_check.py`) | Each safety rule is removed in turn and some test must fail | 69 mutations |
+| Mutation check (`scripts/mutation_check.py`) | Each safety rule is removed in turn and some test must fail | 93 mutations, and 12 more of the store's scripts against each real server |
+| State store contract (`scripts/state-contract.sh`) | The shared state behaves the same in memory, on Redis, on Valkey and on both behind Sentinel | every pull request |
+| Chart in a cluster (`scripts/chart-e2e.sh`, kind) | Three replicas on Valkey behind Sentinel: one allowance and one set of links across pods, a master killed and failed over, the key delivered by the init container, every log line JSON, metrics on their own port, the autoscaler | 19 checks, every pull request |
 | Token budget (`python -m m365_mcp.budget --check`) | The default catalogue stays under 16,000 tokens; every area under 3,500 and every tool under 600 | every pull request |
 | Tool surface lock | A changed argument, enum or annotation is visible in review | every pull request |
 | Live suite (`pytest -m live`, [how](docs/live-testing.md)) | The same tools against a real Microsoft 365 tenant with two people. It also measures what Microsoft's documentation leaves out ([findings](docs/graph-live-findings.md)) | 37 probes, on demand |
@@ -157,15 +159,34 @@ Every safety rule has a test, and each test has been seen failing once with its 
 
 ## Quick start
 
+On Kubernetes, the chart: three ports (MCP for the gateway, signed links for the agent's sandbox,
+metrics), a sealing key from a Secret staged by an init container, and Redis or Valkey for as many
+replicas as the load needs.
+
 ```sh
-docker run -p 8000:8000 -p 8001:8001 \
-  -e M365_LINK_SECRET='<32+ random characters>' \
-  -e M365_LINKS_BASE_URL='https://<public address of port 8001>' \
-  ghcr.io/wide-moat/microsoft-365-mcp:v0.1.0
+scripts/new-sealing-key.sh m365 m365-key
+helm upgrade --install microsoft-365-mcp oci://ghcr.io/wide-moat/charts/microsoft-365-mcp --version 0.2.0 \
+  -n m365 --set key.existingSecret=m365-key --set linksBaseUrl=https://<address of the links port> \
+  --set state.url=redis://<your redis>:6379/0
 ```
 
 It needs an Entra app, an administrator's consent and a gateway that signs each person in to Microsoft.
-The [setup guide](docs/setup/README.md) walks through all of it, step by step.
+The [setup guide](docs/setup/README.md) walks through all of it, step by step;
+[running the server](docs/setup/3-run-the-server.md) covers Docker without Kubernetes.
+
+## Security review
+
+| Question | Answer |
+|---|---|
+| Models | None. The server calls no model; the agent that calls it does. |
+| Where the data goes | To Microsoft's cloud: every tool is a Microsoft Graph call under the person's own token. This server does not keep a mailbox or a file. It does **not** work only inside a closed perimeter: Microsoft 365 is outside it. |
+| Outbound hosts | `graph.microsoft.com` and Microsoft's file hosts (`*.sharepoint.com`, `*.onedrive.com`, `*.1drv.com`, `*.svc.ms`), 443 only; redirects anywhere else are refused. The state store, inside your cluster. |
+| Data in | MCP calls from your gateway, with each person's Graph token; uploads from the agent's sandbox through signed links. |
+| Data out | Tool results to the gateway (projections, never raw Graph); downloads through signed links. |
+| What it keeps | In the state store, for minutes: each person's send allowance and the open file links, as ciphertext under the sealing key and keyed hashes ([state](docs/components/state.md)). No token survives the link that carries it. |
+| Logs | JSON, without subjects, bodies, addresses, names, file names or tokens; a filter drops any line that looks like one and counts it. |
+| Who may use it | Each person, in their own account, with Microsoft's own rights: the gateway signs them in, this server acts as them and never as anyone else. |
+| Reporting a defect | Privately, as [SECURITY.md](SECURITY.md) says. |
 
 ## Documents
 

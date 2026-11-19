@@ -11,11 +11,10 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from test_mail import OWN, person
 
 from m365_mcp.registry import all_tools
 from m365_mcp.server import CONFIRMATION_PARAMS
-
-from test_mail import OWN, person
 
 NOT_TRUE = ["yes", "true", "True", 1, "1", 1.0, None, [True], {"value": True}]
 
@@ -30,8 +29,15 @@ CONFIRMING = sorted(
 def test_the_registry_has_the_confirming_tools_it_should():
     # Counted from the registry, so a rename that hid every parameter from the test below fails here.
     names = {t for t, _ in CONFIRMING}
-    assert {"send_draft", "send_message", "save_event", "cancel_event", "share_file",
-            "save_automatic_reply", "delete_contact"} <= names
+    assert {
+        "send_draft",
+        "send_message",
+        "save_event",
+        "cancel_event",
+        "share_file",
+        "save_automatic_reply",
+        "delete_contact",
+    } <= names
     assert len(CONFIRMING) >= 14
 
 
@@ -45,8 +51,17 @@ async def test_a_confirmation_that_is_not_the_boolean_true_is_refused(graph, inv
 
 
 async def test_send_draft_with_the_word_yes_sends_nothing(graph, invoke):
-    graph.on("GET", "/me/messages/d1", {"id": "d1", "isDraft": True, "subject": "S",
-                                        "toRecipients": [{"emailAddress": {"address": "bo@x.test"}}], **OWN})
+    graph.on(
+        "GET",
+        "/me/messages/d1",
+        {
+            "id": "d1",
+            "isDraft": True,
+            "subject": "S",
+            "toRecipients": [{"emailAddress": {"address": "bo@x.test"}}],
+            **OWN,
+        },
+    )
     graph.on("PATCH", "/me/messages/d1", {})
     graph.on("POST", "/me/messages/d1/send", None, status=202)
     person(graph, "Bo", "bo@x.test")
@@ -59,8 +74,17 @@ async def test_send_draft_with_the_word_yes_sends_nothing(graph, invoke):
 
 
 async def test_false_is_still_a_boolean_and_reaches_the_tool(graph, invoke):
-    graph.on("GET", "/me/messages/d1", {"id": "d1", "isDraft": True, "subject": "S",
-                                        "toRecipients": [{"emailAddress": {"address": "bo@x.test"}}], **OWN})
+    graph.on(
+        "GET",
+        "/me/messages/d1",
+        {
+            "id": "d1",
+            "isDraft": True,
+            "subject": "S",
+            "toRecipients": [{"emailAddress": {"address": "bo@x.test"}}],
+            **OWN,
+        },
+    )
     r = await invoke("send_draft", id="d1", user_confirmed=False)
     assert r.error and "confirm" in r.text and "boolean true" not in r.text
     assert graph.writes() == []

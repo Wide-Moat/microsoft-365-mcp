@@ -8,10 +8,13 @@ person's data.
 from __future__ import annotations
 
 import asyncio
+import functools
 import html
 import logging
+import os
 import random
 import re
+import ssl
 import time
 import uuid
 from collections import defaultdict
@@ -26,6 +29,7 @@ import httpx
 
 from m365_mcp import __version__
 from m365_mcp.graph.errors import GraphError, scope_from_message  # noqa: I001
+from m365_mcp.observability import UPSTREAM_REQUESTS, UPSTREAM_SECONDS, status_class
 
 # httpx logs every request URL at INFO, and Graph URLs carry search strings, addresses and
 # subjects in their query. Nothing below WARNING from the HTTP stack reaches the logs.
@@ -37,8 +41,17 @@ GRAPH_HOST = "graph.microsoft.com"
 # Where Graph sends a download (302) or an upload session: Microsoft's file, media and mail hosts.
 # A URL elsewhere is not followed, though it came from Graph's own answer: the bytes, and for an upload
 # the person's file, would go to a host nobody chose.
-FILE_HOSTS = ("sharepoint.com", "onedrive.com", "1drv.com", "svc.ms", "microsoft.com", "office.com",
-              "office365.com", "office.net", "outlook.com")
+FILE_HOSTS = (
+    "sharepoint.com",
+    "onedrive.com",
+    "1drv.com",
+    "svc.ms",
+    "microsoft.com",
+    "office.com",
+    "office365.com",
+    "office.net",
+    "outlook.com",
+)
 
 
 def on_file_host(url: str, hosts: tuple[str, ...] = FILE_HOSTS) -> bool:
@@ -47,9 +60,11 @@ def on_file_host(url: str, hosts: tuple[str, ...] = FILE_HOSTS) -> bool:
     host = (parts.hostname or "").lower()
     return parts.scheme == "https" and any(host == h or host.endswith("." + h) for h in hosts)
 
+
 # Paths a DELETE may target. Messages are never deleted — they are moved to Deleted Items.
 _DELETE_ALLOWED = [
-    re.compile(p) for p in (
+    re.compile(p)
+    for p in (
         r"^/me/drive/items/[^/]+$",
         r"^/drives/[^/]+/items/[^/]+$",
         r"^/me/todo/lists/[^/]+/tasks/[^/]+$",
@@ -58,11 +73,11 @@ _DELETE_ALLOWED = [
         r"^/me/contacts/[^/]+$",
         r"^/me/contactFolders/[^/]+/contacts/[^/]+$",
         r"^/sites/[^/]+/lists/[^/]+/items/[^/]+$",
-        r"^/me/messages/[^/]+/attachments/[^/]+$",   # removing an attachment from a draft
-        r"^/chats/[^/]+/members/[^/]+$",              # removing someone from a group chat (save_chat)
+        r"^/me/messages/[^/]+/attachments/[^/]+$",  # removing an attachment from a draft
+        r"^/chats/[^/]+/members/[^/]+$",  # removing someone from a group chat (save_chat)
         r"^/drives/[^/]+/items/[^/]+/permissions/[^/]+$",
         r"^/me/drive/items/[^/]+/permissions/[^/]+$",
-        r"^/me/events/[^/]+$",   # an event nobody is invited to (cancel_event); it goes to Deleted Items
+        r"^/me/events/[^/]+$",  # an event nobody is invited to (cancel_event); it goes to Deleted Items
     )
 ]
 
@@ -98,10 +113,12 @@ MAX_WAIT = 30.0
 
 
 def _retry_after(resp: httpx.Response) -> int | None:
-    raw = resp.headers.get("Retry-After")
-    if raw and raw.isdigit():
-        return int(raw)
-    return None
+    raw = (resp.headers.get("Retry-After") or "").strip()
+    try:
+        wait = int(raw)
+    except ValueError:
+        return None  # an HTTP date, or nothing: the caller's own wait applies
+    return wait if wait >= 0 else None
 
 
 class Pacer:
@@ -139,9 +156,21 @@ PACER = Pacer()
 
 
 def family_of(path: str) -> str:
-    if path.startswith(("/me/messages", "/me/mailFolders", "/me/events", "/me/calendar", "/me/sendMail",
-                        "/me/mailboxSettings", "/me/contacts", "/me/contactFolders", "/me/findMeetingTimes",
-                        "/me/calendarView", "/me/calendars")):
+    if path.startswith(
+        (
+            "/me/messages",
+            "/me/mailFolders",
+            "/me/events",
+            "/me/calendar",
+            "/me/sendMail",
+            "/me/mailboxSettings",
+            "/me/contacts",
+            "/me/contactFolders",
+            "/me/findMeetingTimes",
+            "/me/calendarView",
+            "/me/calendars",
+        )
+    ):
         return "outlook"
     if path.startswith(("/me/drive", "/drives/", "/sites/", "/shares/")):
         return "drive"
@@ -160,19 +189,72 @@ class Page:
     next_link: str | None
 
 
-class Graph:
-    """One instance per tool call, carrying the person's token."""
+@functools.cache
+def tls_context(ca_bundle: str) -> ssl.SSLContext | bool:
+    """The system's CAs, plus an installation's own (`M365_CA_BUNDLE`) when a TLS-inspecting proxy at the
+    perimeter re-signs Microsoft's certificates. Verification is never turned off."""
+    if not ca_bundle:
+        return True
+    ctx = ssl.create_default_context()
+    ctx.load_verify_locations(cafile=ca_bundle)
+    return ctx
 
-    def __init__(self, token: str, person_key: str, *, timezone: str | None = None,
-                 transport: httpx.AsyncBaseTransport | None = None, sleep=asyncio.sleep,
-                 pacer: Pacer = PACER) -> None:
+
+async def _started(request: httpx.Request) -> None:
+    request.extensions["m365_t0"] = time.perf_counter()
+
+
+async def _answered(response: httpx.Response) -> None:
+    """Every answer from Graph or a Microsoft file host, counted by status class and timed to its headers.
+    Hooks rather than a transport: a proxy from the environment replaces the transport, not the hooks."""
+    response.request.extensions["m365_answered"] = True
+    t0 = response.request.extensions.get("m365_t0")
+    if isinstance(t0, float):
+        UPSTREAM_SECONDS.one().observe(time.perf_counter() - t0)
+    UPSTREAM_REQUESTS.labels(status_class(response.status_code)).inc()
+
+
+class _MeteredClient(httpx.AsyncClient):
+    """`send` is the one path of every request, streamed or not: a request that got no answer at all is
+    counted here as `error`, once; one that was answered was counted by its status, and a failure while
+    reading its body is not a second request."""
+
+    async def send(self, request: httpx.Request, **kwargs: Any) -> httpx.Response:
+        try:
+            return await super().send(request, **kwargs)
+        except httpx.HTTPError:
+            if not request.extensions.get("m365_answered"):
+                UPSTREAM_REQUESTS.labels("error").inc()
+            raise
+
+
+class Graph:
+    """One instance per tool call, carrying the person's token.
+
+    Concurrency and pacing per person (`Pacer`) hold within one process. With several replicas a person's
+    calls may land on different pods, each pacing alone; the limits are low enough that the replica count
+    an installation runs stays under Graph's throttling, and Graph's own 429 with Retry-After is honoured
+    either way."""
+
+    def __init__(
+        self,
+        token: str,
+        person_key: str,
+        *,
+        timezone: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        sleep=asyncio.sleep,
+        pacer: Pacer = PACER,
+    ) -> None:
         self._token = token
         self._person = person_key
         self.timezone = timezone
         self._sleep = sleep
         self._pacer = pacer
-        self._client = httpx.AsyncClient(
+        self._client = _MeteredClient(
             transport=transport,
+            verify=tls_context(os.environ.get("M365_CA_BUNDLE", "").strip()),
+            event_hooks={"request": [_started], "response": [_answered]},
             timeout=httpx.Timeout(30.0, connect=10.0),
             follow_redirects=False,
         )
@@ -222,9 +304,17 @@ class Graph:
         _check_path(path_or_url)
         return GRAPH + path_or_url
 
-    async def request(self, method: str, path: str, *, params: dict[str, Any] | None = None,
-                      json: Any = None, content: bytes | None = None, headers: dict[str, str] | None = None,
-                      retry_server_errors: bool | None = None) -> httpx.Response:
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+        content: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        retry_server_errors: bool | None = None,
+    ) -> httpx.Response:
         url = self._url(path)
         if method == "DELETE" and not any(r.match(path) for r in _DELETE_ALLOWED):
             raise ValueError("DELETE is not allowed on this path")
@@ -234,8 +324,9 @@ class Graph:
         for attempt in range(1, MAX_ATTEMPTS + 1):
             async with self._pacer.sem(self._person, family):
                 await self._pacer.space(self._person, family, sleep=self._sleep)
-                resp = await self._client.request(method, url, params=params, json=json, content=content,
-                                                  headers=self._headers(headers))
+                resp = await self._client.request(
+                    method, url, params=params, json=json, content=content, headers=self._headers(headers)
+                )
             if resp.status_code < 400:
                 return resp
             # 429 means Graph did not take the request, so any method may repeat it. A 5xx may have
@@ -268,19 +359,32 @@ class Graph:
             # message is a fixed word, never the person's data, so it is kept as the inner code.
             inner = "ParsingFailed"
         missing = scope_from_message(message) if resp.status_code == 403 else None
-        return GraphError(resp.status_code, code, resp.headers.get("request-id", ""), _retry_after(resp), missing,
-                          inner_code=inner, method=method)
+        return GraphError(
+            resp.status_code,
+            code,
+            resp.headers.get("request-id", ""),
+            _retry_after(resp),
+            missing,
+            inner_code=inner,
+            method=method,
+        )
 
-    async def get(self, path: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    async def get(
+        self, path: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         resp = await self.request("GET", path, params=params, headers=headers)
         # 204 with no body is a real answer: a new mailbox reads its unset time zone that way.
         return resp.json() if resp.content else {}
 
-    async def post(self, path: str, json: Any = None, *, headers: dict[str, str] | None = None) -> dict[str, Any] | None:
+    async def post(
+        self, path: str, json: Any = None, *, headers: dict[str, str] | None = None
+    ) -> dict[str, Any] | None:
         resp = await self.request("POST", path, json=json, headers=headers)
         return resp.json() if resp.content and "json" in resp.headers.get("content-type", "") else None
 
-    async def patch(self, path: str, json: Any, *, if_match: str | None = None, headers: dict[str, str] | None = None) -> dict[str, Any] | None:
+    async def patch(
+        self, path: str, json: Any, *, if_match: str | None = None, headers: dict[str, str] | None = None
+    ) -> dict[str, Any] | None:
         h = dict(headers or {})
         if if_match:
             h["If-Match"] = if_match
@@ -346,8 +450,9 @@ class Graph:
     async def delete(self, path: str, *, if_match: str | None = None) -> None:
         await self.request("DELETE", path, headers={"If-Match": if_match} if if_match else None)
 
-    async def page(self, path_or_next: str, *, params: dict[str, Any] | None = None,
-                   headers: dict[str, str] | None = None) -> Page:
+    async def page(
+        self, path_or_next: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None
+    ) -> Page:
         if path_or_next.startswith("https://"):
             params = None  # the next link carries its own query
         body = await self.get(path_or_next, params=params, headers=headers)
@@ -365,15 +470,22 @@ class Graph:
         async def translate(batch: list[str], source: str, target: str) -> dict[str, str]:
             """Every id of the batch translated, or a failure: a result missing an id (Graph answers
             200 with per-item errorDetails) must not leave that id to pass as it was."""
-            body = await self.post("/me/translateExchangeIds", {
-                "inputIds": batch, "sourceIdType": source, "targetIdType": target}) or {}
-            got = {r["sourceId"]: r["targetId"] for r in body.get("value", []) if r.get("sourceId") and r.get("targetId")}
+            body = (
+                await self.post(
+                    "/me/translateExchangeIds", {"inputIds": batch, "sourceIdType": source, "targetIdType": target}
+                )
+                or {}
+            )
+            got = {
+                r["sourceId"]: r["targetId"] for r in body.get("value", []) if r.get("sourceId") and r.get("targetId")
+            }
             if any(i not in got for i in batch):
                 raise GraphError(502, "translationIncomplete", "")
             return got
 
         async def ask(batch: list[str]) -> None:
             out.update(await translate(batch, "restId", "restImmutableEntryId"))
+
         try:
             await ask(ids)
         except GraphError as e:
@@ -395,12 +507,14 @@ class Graph:
     # -- bytes --------------------------------------------------------------------------
 
     @asynccontextmanager
-    async def stream(self, path: str, *, headers: dict[str, str] | None = None,
-                     params: dict[str, str] | None = None) -> AsyncIterator[httpx.Response]:
+    async def stream(
+        self, path: str, *, headers: dict[str, str] | None = None, params: dict[str, str] | None = None
+    ) -> AsyncIterator[httpx.Response]:
         """GET that follows Graph's 302 to a pre-authenticated download URL, streamed."""
         url = self._url(path)
         resp = await self._client.send(
-            self._client.build_request("GET", url, params=params, headers=self._headers(headers)), stream=True)
+            self._client.build_request("GET", url, params=params, headers=self._headers(headers)), stream=True
+        )
         try:
             if resp.status_code in (301, 302, 303, 307, 308):
                 location = resp.headers.get("Location", "")
@@ -442,8 +556,11 @@ class Graph:
         last: httpx.Response | None = None
         async for chunk in chunks:
             end = offset + len(chunk) - 1
-            last = await self._client.put(upload_url, content=chunk, headers={
-                "Content-Length": str(len(chunk)), "Content-Range": f"bytes {offset}-{end}/{size}"})
+            last = await self._client.put(
+                upload_url,
+                content=chunk,
+                headers={"Content-Length": str(len(chunk)), "Content-Range": f"bytes {offset}-{end}/{size}"},
+            )
             if last.status_code >= 400:
                 raise self._error(last)
             offset = end + 1

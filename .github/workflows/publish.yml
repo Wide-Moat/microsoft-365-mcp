@@ -1,31 +1,227 @@
-# A release tag publishes the image to this repository's GitHub Container Registry.
+# A tag v<x.y.z> publishes that version, and only after every check in validate.yml passed on it:
+#   the image (linux/amd64 and linux/arm64, one manifest list), scanned before any tag is pushed;
+#   the chart, oci://ghcr.io/wide-moat/charts/microsoft-365-mcp:<x.y.z>, pointing at that image;
+#   a GitHub Release whose notes are the version's CHANGELOG section, the digest to pin and the chart.
+# Image tags: <x.y.z> and <x.y>, nothing else (no `latest`, no staging tag): an installation pins a version
+# or a digest. The archive built once is checked on both platforms, scanned, and then pushed as it is.
 name: publish
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*.*.*"]
 
 permissions:
   contents: read
-  packages: write
+
+# One publication per tag; releases of different tags may run at once (a shared group would keep one
+# pending run and cancel the others). <x.y> is set to the newest <x.y.z> by whichever finishes last.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+    permissions:
+      contents: read
+      pull-requests: write
+
   image:
+    needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      IMAGE: ghcr.io/wide-moat/microsoft-365-mcp
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: build and push
-        shell: bash
-        env:
-          TAG: ${{ github.ref_name }}
+      - name: the tag is the version everywhere
         run: |
           set -euo pipefail
-          image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          docker build -t "$image:$TAG" -t "$image:latest" .
-          docker push "$image:$TAG"
-          docker push "$image:latest"
+          v="${GITHUB_REF_NAME#v}"
+          grep -qxF "version = \"${v}\"" pyproject.toml
+          grep -qxF "__version__ = \"${v}\"" src/m365_mcp/__init__.py
+          grep -qxF "version: ${v}" charts/microsoft-365-mcp/Chart.yaml
+          grep -qxF "appVersion: \"${v}\"" charts/microsoft-365-mcp/Chart.yaml
+          awk -v h="## ${v}:" 'index($0, h) == 1 {found=1} END {exit !found}' CHANGELOG.md
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: skopeo, to check and push the archive as it is
+        run: |
+          set -euo pipefail
+          command -v skopeo >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q skopeo; }
+          skopeo --version
+      # One build of both platforms into a local archive. Everything below checks that archive, and the same
+      # archive is what reaches the registry: nothing is pushed before it passed, and nothing is rebuilt.
+      - name: build both platforms into one archive
+        run: |
+          set -euo pipefail
+          # a plain Docker manifest list with the two platforms only: provenance and SBOM entries
+          # (platform unknown/unknown) make some registry proxies offer one platform
+          docker buildx build --platform linux/amd64,linux/arm64 --provenance=false --sbom=false \
+            --output type=oci,dest=/tmp/image.tar,oci-mediatypes=false .
+          skopeo inspect --raw oci-archive:/tmp/image.tar > index.json
+          python3 - <<'PY'
+          import json
+          d = json.load(open("index.json"))
+          seen = sorted(f"{m['platform']['os']}/{m['platform']['architecture']}" for m in d.get("manifests") or [])
+          print(d.get("mediaType"), seen)
+          assert d.get("mediaType", "").endswith("manifest.list.v2+json"), "not a manifest list"
+          assert seen == ["linux/amd64", "linux/arm64"], seen
+          PY
+      - name: install the pinned trivy
+        env:
+          TRIVY_VERSION: 0.73.0
+          TRIVY_SHA256: 2edd39da482bb4e9831962487b68f68e3928ec3137794757f54d00383d79547b
+        run: |
+          set -euo pipefail
+          base="https://github.com/aquasecurity/trivy/releases/download"
+          curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o /tmp/trivy.tar.gz \
+            "${base}/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy && chmod +x /tmp/trivy
+      - name: each platform runs unprivileged, with this version, without a fixable HIGH or CRITICAL
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME#v}"
+          for arch in amd64 arm64; do
+            skopeo copy --override-arch "$arch" oci-archive:/tmp/image.tar "docker-daemon:m365-mcp:$arch"
+            got=$(docker run --rm --platform "linux/$arch" --entrypoint python "m365-mcp:$arch" -c \
+              'import os, m365_mcp; print(m365_mcp.__version__, os.getuid())')
+            echo "linux/$arch: $got"
+            test "$got" = "$v 10001"
+            /tmp/trivy image --no-progress --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+              --list-all-pkgs --format json -o "/tmp/scan-$arch.json" "m365-mcp:$arch"
+            ARCH="$arch" python3 - <<'PY'
+          import json, os, sys
+          arch = os.environ["ARCH"]
+          d = json.load(open(f"/tmp/scan-{arch}.json"))
+          results = d.get("Results") or []
+          os_pkgs = [p for r in results if r.get("Class") == "os-pkgs" for p in (r.get("Packages") or [])]
+          def norm(name):
+              return name.lower().replace("_", "-").replace(".", "-")
+          python = {norm(p["Name"]) for r in results if r.get("Type") == "python-pkg"
+                    for p in (r.get("Packages") or [])}
+          # Every locked dependency must be in the report: a scan that skipped one cannot vouch for it.
+          locked = {norm(line.split("==")[0]) for line in open("requirements.lock")
+                    if "==" in line and line[0].isalpha()}
+          missing = sorted(locked - python)
+          vulns = [v for r in results for v in (r.get("Vulnerabilities") or [])]
+          print(f"{arch}: {len(os_pkgs)} system packages, {len(python)} Python packages,",
+                f"{len(vulns)} fixable HIGH/CRITICAL")
+          if not os_pkgs or missing:
+              print("trivy did not see the system packages, or these locked ones:", ", ".join(missing))
+              sys.exit(2)
+          for v in vulns:
+              print(v["VulnerabilityID"], v.get("PkgName"), v.get("InstalledVersion"), "->", v.get("FixedVersion"))
+          sys.exit(1 if vulns else 0)
+          PY
+          done
+      - name: push the checked archive under the version's tags
+        id: build
+        env:
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME#v}"
+          echo "$TOKEN" | skopeo login ghcr.io -u "$ACTOR" --password-stdin
+          skopeo copy --all --preserve-digests --digestfile /tmp/digest oci-archive:/tmp/image.tar "docker://$IMAGE:$v"
+          digest=$(cat /tmp/digest)
+          case "$digest" in sha256:*) ;; *) echo "no digest after push: ${digest}"; exit 1;; esac
+          echo "what an installation should pin: $IMAGE@$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+  # Each <x.y> points at the newest <x.y.z> in the registry. One job at a time across every release, so a
+  # list and its updates never interleave with another's; a run waiting here may be replaced by a newer
+  # one, which reads the registry afresh and sets every <x.y> again.
+  alias:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: publish-alias
+      cancel-in-progress: false
+    env:
+      IMAGE: ghcr.io/wide-moat/microsoft-365-mcp
+    steps:
+      - name: <x.y> to the newest <x.y.z>
+        env:
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          command -v skopeo >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q skopeo; }
+          v="${GITHUB_REF_NAME#v}"
+          echo "$TOKEN" | skopeo login ghcr.io -u "$ACTOR" --password-stdin
+          tags=$(skopeo list-tags "docker://$IMAGE" | jq -r '.Tags[] | select(test("^[0-9]+[.][0-9]+[.][0-9]+$"))')
+          grep -qxF "$v" <<<"$tags" || { echo "the registry does not list ${v} just pushed"; exit 1; }
+          # Every <x.y>, not only this release's: a run that was replaced while waiting left its own undone.
+          for mm in $(cut -d. -f1-2 <<<"$tags" | sort -uV); do
+            newest=$(grep -E "^${mm//./[.]}[.][0-9]+$" <<<"$tags" | sort -V | tail -1)
+            skopeo copy --all --preserve-digests "docker://$IMAGE:$newest" "docker://$IMAGE:$mm"
+            echo "$mm -> $newest"
+          done
+
+  chart:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: package and push
+        env:
+          TAG: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          helm package charts/microsoft-365-mcp --destination /tmp/chart
+          pkg="/tmp/chart/microsoft-365-mcp-${version}.tgz"
+          test -s "$pkg" || { echo "no package ${pkg}"; exit 1; }
+          echo "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+          helm push "$pkg" oci://ghcr.io/wide-moat/charts
+          helm show chart oci://ghcr.io/wide-moat/charts/microsoft-365-mcp --version "$version" \
+            | grep -qx "version: ${version}"
+
+  release:
+    needs: [image, chart]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: notes from CHANGELOG, with the digest and the chart
+        env:
+          TAG: ${{ github.ref_name }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          awk -v h="## ${version}:" 'index($0, h) == 1 {on=1; next} /^## /{on=0} on' CHANGELOG.md >notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section ## ${version}"; exit 1; }
+          test -n "$DIGEST" || { echo "the image job returned no digest"; exit 1; }
+          image="ghcr.io/wide-moat/microsoft-365-mcp"
+          chart="oci://ghcr.io/wide-moat/charts/microsoft-365-mcp"
+          readme="https://github.com/wide-moat/microsoft-365-mcp/blob/${TAG}/charts/microsoft-365-mcp/README.md"
+          printf '\n## Image\n\n`%s@%s` (linux/amd64, linux/arm64)\n' "$image" "$DIGEST" >> notes.md
+          printf '\n## Chart\n\n`helm upgrade --install microsoft-365-mcp %s --version %s -f values.yaml`\n\n' \
+            "$chart" "$version" >> notes.md
+          printf 'Values, the key Secret and the store: [chart README](%s).\n' "$readme" >> notes.md
+      - name: create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file notes.md --verify-tag

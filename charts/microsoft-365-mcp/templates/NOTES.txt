@@ -1,0 +1,3 @@
+microsoft-365-mcp {{ .Chart.AppVersion }}: MCP at http://{{ include "m365.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/mcp (for the gateway only)
+File links: {{ .Values.linksBaseUrl | default "(off)" }}; metrics: port {{ .Values.metrics.port }}, /metrics.
+Shared state: {{ if .Values.state.url }}{{ .Values.state.url }}{{ else if .Values.state.sentinel.hosts }}Sentinel {{ join "," .Values.state.sentinel.hosts }} ({{ .Values.state.sentinel.master }}){{ else }}this pod's memory (one replica only){{ end }}.

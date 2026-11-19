@@ -23,6 +23,7 @@ def jwt(oid: str, upn: str) -> str:
 def fake_signin(oid: str, upn: str):
     def device_login(http, client_id, scope, label):
         return {"access_token": jwt(oid, upn), "refresh_token": "r-" + oid, "expires_at": 9999999999, "scope": scope}
+
     return device_login
 
 
@@ -32,7 +33,9 @@ def out(tmp_path: Path) -> Path:
 
 
 def test_user_option_signs_in_only_that_user_and_keeps_the_other(out, monkeypatch):
-    out.write_text(json.dumps({"a": {"access_token": jwt("oid-a", "a@x.test"), "refresh_token": "ra", "expires_at": 1}}))
+    out.write_text(
+        json.dumps({"a": {"access_token": jwt("oid-a", "a@x.test"), "refresh_token": "ra", "expires_at": 1}})
+    )
     monkeypatch.setattr(live_login, "device_login", fake_signin("oid-b", "b@x.test"))
     assert live_login.main(["--client-id", "c", "--out", str(out), "--user", "b"]) == 0
     data = json.loads(out.read_text())
@@ -58,10 +61,13 @@ def test_user_option_refuses_the_same_account_as_the_other_user(out, monkeypatch
 
 
 def test_refresh_renews_only_the_users_present(out, monkeypatch):
-    out.write_text(json.dumps({"a": {"access_token": jwt("oid-a", "a@x.test"), "refresh_token": "ra", "expires_at": 1}}))
+    out.write_text(
+        json.dumps({"a": {"access_token": jwt("oid-a", "a@x.test"), "refresh_token": "ra", "expires_at": 1}})
+    )
 
     def refresh(http, client_id, entry, label):
         return {**entry, "expires_at": 9999999999}
+
     monkeypatch.setattr(live_login, "refresh", refresh)
     assert live_login.main(["--client-id", "c", "--out", str(out), "--refresh"]) == 0
     assert json.loads(out.read_text())["a"]["expires_at"] == 9999999999
@@ -80,10 +86,20 @@ def _sign_in_capturing_urls(monkeypatch, out, argv):
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(str(request.url))
         if request.url.path.endswith("/devicecode"):
-            return httpx.Response(200, json={"device_code": "d", "user_code": "U", "verification_uri": "https://v",
-                                             "expires_in": 900, "interval": 0})
-        return httpx.Response(200, json={"access_token": jwt("oid-" + str(len(seen)), "u@x.test"),
-                                         "refresh_token": "r", "expires_in": 3600})
+            return httpx.Response(
+                200,
+                json={
+                    "device_code": "d",
+                    "user_code": "U",
+                    "verification_uri": "https://v",
+                    "expires_in": 900,
+                    "interval": 0,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"access_token": jwt("oid-" + str(len(seen)), "u@x.test"), "refresh_token": "r", "expires_in": 3600},
+        )
 
     real_client = httpx.Client
     monkeypatch.setattr(live_login.httpx, "Client", lambda **kw: real_client(transport=httpx.MockTransport(handler)))
@@ -96,9 +112,12 @@ def test_tenant_option_pins_sign_in_to_that_tenant(out, monkeypatch):
     # /organizations lets the browser's current account answer, and a person signed in to another
     # organisation gets AADSTS5000228 for a tenant they never meant (seen 2026-10-24).
     monkeypatch.delenv("M365_LIVE_TENANT", raising=False)
-    seen = _sign_in_capturing_urls(monkeypatch, out, ["--client-id", "c", "--out", str(out), "--user", "a",
-                                                      "--tenant", "contoso.onmicrosoft.com"])
-    assert seen and all(u.startswith("https://login.microsoftonline.com/contoso.onmicrosoft.com/oauth2/v2.0/") for u in seen)
+    seen = _sign_in_capturing_urls(
+        monkeypatch, out, ["--client-id", "c", "--out", str(out), "--user", "a", "--tenant", "contoso.onmicrosoft.com"]
+    )
+    assert seen and all(
+        u.startswith("https://login.microsoftonline.com/contoso.onmicrosoft.com/oauth2/v2.0/") for u in seen
+    )
 
 
 def test_tenant_comes_from_the_environment_and_defaults_to_organizations(out, monkeypatch):

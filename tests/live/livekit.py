@@ -60,7 +60,7 @@ def token_problem(tokens: dict | None, now: float | None = None) -> str | None:
         try:
             expires = int(t.get("expires_at") or 0)
         except (TypeError, ValueError):
-            return f"the {label} token in the tokens file has no usable expiry; run scripts/live_login.py again"
+            return f"the user {who} token in the tokens file has no usable expiry; run scripts/live_login.py again"
         if expires - now < MIN_TOKEN_LIFE:
             return f"the token of user {who} has expired or expires within {MIN_TOKEN_LIFE // 60} minutes"
     return None
@@ -110,11 +110,20 @@ class Live:
         self.settings = Settings(
             areas=frozenset(a for a, on in AREAS.items() if on),
             switches=frozenset({"teams_channels", "transcripts", "rooms"}),
-            sign_keys=(sign,), enc_keys=(enc,), links_base_url=LINKS_BASE)
+            sign_keys=(sign,),
+            enc_keys=(enc,),
+            links_base_url=LINKS_BASE,
+        )
         # The bucket's clock runs 60 times faster, so a run is not throttled by the limit that unit tests
         # already cover. Everything else is the production runtime: real network, real sleep.
-        self.rt = Runtime(settings=self.settings, signer=LinkSigner((sign,), (enc,), LinkStore()), cursors=Cursors(sign),
-                          guard=Guard(clock=lambda: time.monotonic() * 60), transport=None, sleep=None)
+        self.rt = Runtime(
+            settings=self.settings,
+            signer=LinkSigner((sign,), (enc,), LinkStore()),
+            cursors=Cursors(sign),
+            guard=Guard(clock=lambda: time.monotonic() * 60),
+            transport=None,
+            sleep=None,
+        )
         self.server = M365Server(self.settings)
         self.install()
 
@@ -160,16 +169,24 @@ class Live:
         entry = self.tokens[user]
         tok = claims(entry["access_token"])
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(f"https://login.microsoftonline.com/{tok['tid']}/oauth2/v2.0/token", data={
-                "client_id": tok.get("appid") or tok["azp"], "grant_type": "refresh_token",
-                "refresh_token": entry["refresh_token"],
-                "scope": " ".join(f"https://graph.microsoft.com/{s}" for s in scopes)})
+            resp = await client.post(
+                f"https://login.microsoftonline.com/{tok['tid']}/oauth2/v2.0/token",
+                data={
+                    "client_id": tok.get("appid") or tok["azp"],
+                    "grant_type": "refresh_token",
+                    "refresh_token": entry["refresh_token"],
+                    "scope": " ".join(f"https://graph.microsoft.com/{s}" for s in scopes),
+                },
+            )
         assert resp.status_code == 200, f"refresh asking for {scopes}: {resp.status_code}"
         return resp.json()["access_token"]
 
     async def raw(self, user: str, method: str, path: str, *, prefer: str | None = None, **kw: Any) -> httpx.Response:
-        headers = {"Authorization": f"Bearer {self.tokens[user]['access_token']}", "Accept": "application/json",
-                   "Prefer": 'IdType="ImmutableId"' + (f", {prefer}" if prefer else "")}
+        headers = {
+            "Authorization": f"Bearer {self.tokens[user]['access_token']}",
+            "Accept": "application/json",
+            "Prefer": 'IdType="ImmutableId"' + (f", {prefer}" if prefer else ""),
+        }
         headers.update(kw.pop("headers", {}))
         url = path if path.startswith("https://") else GRAPH + path
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0), follow_redirects=False) as client:
@@ -196,7 +213,7 @@ class Live:
     @staticmethod
     def _path(url: str) -> str:
         assert url.startswith(LINKS_BASE), url
-        return url[len(LINKS_BASE):]
+        return url[len(LINKS_BASE) :]
 
     @staticmethod
     def _client() -> TestClient:
@@ -275,10 +292,12 @@ class Live:
         async def ready() -> bool:
             error, _, data = await self.invoke("a", "list_notes", notebook=name)
             return not error and data["count"] > 0
+
         await self.poll(ready, timeout=60, what="the new notebook and section to be listed")
 
         async def left_behind() -> None:
             raise RuntimeError(f"notebook '{name}' cannot be deleted through Graph; delete it in OneNote")
+
         self.later("notebook", left_behind)
         self.state["notes"] = (name, "Live")
         return self.state["notes"]
@@ -294,6 +313,7 @@ class Live:
             # Already removed by the scenario itself is the normal case, not a failure.
             if error and not text.startswith(("It does not exist", "No ", "This contact was deleted")):
                 raise RuntimeError(text[:200])
+
         self.later(f"{_tool} as {user}", run)
 
     async def _sweep_mail(self, user: str) -> None:
@@ -315,8 +335,12 @@ class Live:
                 break
 
     async def _sweep_events(self, user: str) -> None:
-        r = await self.raw(user, "GET", "/me/events", params={
-            "$filter": f"contains(subject,'{self.run}')", "$select": "id", "$top": "50"})
+        r = await self.raw(
+            user,
+            "GET",
+            "/me/events",
+            params={"$filter": f"contains(subject,'{self.run}')", "$select": "id", "$top": "50"},
+        )
         if r.status_code != 200:
             raise RuntimeError(self.error_of(r))
         for e in r.json().get("value", []):

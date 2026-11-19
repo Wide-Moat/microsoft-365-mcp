@@ -10,17 +10,29 @@ from m365_mcp.core.errors import invalid
 
 # Outlook reports Windows zone names; the common ones mapped to IANA. Unknown → UTC, said so.
 WINDOWS_ZONES = {
-    "UTC": "UTC", "GMT Standard Time": "Europe/London", "W. Europe Standard Time": "Europe/Berlin",
-    "Romance Standard Time": "Europe/Paris", "Central Europe Standard Time": "Europe/Budapest",
-    "E. Europe Standard Time": "Europe/Chisinau", "FLE Standard Time": "Europe/Kiev",
-    "Russian Standard Time": "Europe/Moscow", "Eastern Standard Time": "America/New_York",
-    "Central Standard Time": "America/Chicago", "Mountain Standard Time": "America/Denver",
-    "Pacific Standard Time": "America/Los_Angeles", "GTB Standard Time": "Europe/Bucharest",
-    "Greenwich Standard Time": "Atlantic/Reykjavik", "India Standard Time": "Asia/Kolkata",
-    "China Standard Time": "Asia/Shanghai", "Tokyo Standard Time": "Asia/Tokyo",
-    "AUS Eastern Standard Time": "Australia/Sydney", "Arabian Standard Time": "Asia/Dubai",
-    "Turkey Standard Time": "Europe/Istanbul", "Israel Standard Time": "Asia/Jerusalem",
-    "E. South America Standard Time": "America/Sao_Paulo", "SA Pacific Standard Time": "America/Bogota",
+    "UTC": "UTC",
+    "GMT Standard Time": "Europe/London",
+    "W. Europe Standard Time": "Europe/Berlin",
+    "Romance Standard Time": "Europe/Paris",
+    "Central Europe Standard Time": "Europe/Budapest",
+    "E. Europe Standard Time": "Europe/Chisinau",
+    "FLE Standard Time": "Europe/Kiev",
+    "Russian Standard Time": "Europe/Moscow",
+    "Eastern Standard Time": "America/New_York",
+    "Central Standard Time": "America/Chicago",
+    "Mountain Standard Time": "America/Denver",
+    "Pacific Standard Time": "America/Los_Angeles",
+    "GTB Standard Time": "Europe/Bucharest",
+    "Greenwich Standard Time": "Atlantic/Reykjavik",
+    "India Standard Time": "Asia/Kolkata",
+    "China Standard Time": "Asia/Shanghai",
+    "Tokyo Standard Time": "Asia/Tokyo",
+    "AUS Eastern Standard Time": "Australia/Sydney",
+    "Arabian Standard Time": "Asia/Dubai",
+    "Turkey Standard Time": "Europe/Istanbul",
+    "Israel Standard Time": "Asia/Jerusalem",
+    "E. South America Standard Time": "America/Sao_Paulo",
+    "SA Pacific Standard Time": "America/Bogota",
 }
 
 _LOCAL = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?\s*(Z|[+-]\d{2}:?\d{2})?$")
@@ -61,7 +73,9 @@ def parse(value: str, tz: ZoneInfo, *, field: str = "time") -> datetime:
     except ValueError:
         raise invalid(f"{field} is not a real date or time.") from None
     if off:
-        return datetime.fromisoformat(dt.isoformat() + ("+00:00" if off == "Z" else off if ":" in off else off[:3] + ":" + off[3:]))
+        return datetime.fromisoformat(
+            dt.isoformat() + ("+00:00" if off == "Z" else off if ":" in off else off[:3] + ":" + off[3:])
+        )
     return dt.replace(tzinfo=tz)
 
 

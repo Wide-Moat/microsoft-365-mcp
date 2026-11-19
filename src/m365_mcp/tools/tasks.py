@@ -15,8 +15,8 @@ from pydantic import Field
 from m365_mcp.core.confirm import require
 from m365_mcp.core.context import Call, call, scope_granted
 from m365_mcp.core.errors import M365Error, invalid
-from m365_mcp.core.ids import segment
 from m365_mcp.core.html import content_block, content_line
+from m365_mcp.core.ids import segment
 from m365_mcp.core.project import clamp_limit, compact, page_result
 from m365_mcp.core.resolve import Who, groups_among, one, person
 from m365_mcp.core.time import from_graph, graph_dt, parse
@@ -28,8 +28,13 @@ ASSIGNMENT = {"@odata.type": "#microsoft.graph.plannerAssignment", "orderHint": 
 MAX_PAGES = 5
 MAX_TITLE = 255  # To Do cuts a longer title to 255 characters and says nothing (measured)
 MAX_TEAMS = 20  # teams whose plans are read; each costs one request
-_TODO_STATUS = {"notStarted": "open", "inProgress": "in_progress", "completed": "completed",
-                "waitingOnOthers": "waiting on others", "deferred": "deferred"}
+_TODO_STATUS = {
+    "notStarted": "open",
+    "inProgress": "in_progress",
+    "completed": "completed",
+    "waitingOnOthers": "waiting on others",
+    "deferred": "deferred",
+}
 
 
 def _priority_name(p: int | None) -> str | None:
@@ -76,8 +81,9 @@ async def _plan(c: Call, query: str) -> dict[str, Any]:
         return one(query, plans, kind="plan", name=lambda p: p["title"])
     except M365Error as e:
         if e.key == "unresolved":
-            raise M365Error("unresolved", kind="Planner plan you belong to (premium plans are not available)",
-                            query=query) from None
+            raise M365Error(
+                "unresolved", kind="Planner plan you belong to (premium plans are not available)", query=query
+            ) from None
         raise
 
 
@@ -102,29 +108,49 @@ def _details(notes: str | None, items: list[tuple[str, bool]]) -> dict[str, Any]
     """A task's notes and checklist items (save_task wrote a checklist no tool
     read back). Notes may be written by someone else on a shared list or plan, so they are fenced."""
     text = (notes or "").strip()[:NOTES_CHARS]
-    return compact({"notes": content_block("the task", text) if text else None,
-                    "checklist_items": [{"item": t, "done": d} for t, d in items] or None})
+    return compact(
+        {
+            "notes": content_block("the task", text) if text else None,
+            "checklist_items": [{"item": t, "done": d} for t, d in items] or None,
+        }
+    )
 
 
 def _todo_row(t: dict[str, Any], list_name: str, c: Call) -> dict[str, Any]:
-    return compact({
-        "id": t.get("id"), "source": "todo", "list": list_name, "title": t.get("title"),
-        "status": _TODO_STATUS.get(t.get("status") or "notStarted", t.get("status")),
-        "due": _due_local(t, c), "importance": t.get("importance") if t.get("importance") != "normal" else None,
-        "reminder": from_graph(t.get("reminderDateTime"), c.tz) if t.get("isReminderOn") else None,
-    })
+    return compact(
+        {
+            "id": t.get("id"),
+            "source": "todo",
+            "list": list_name,
+            "title": t.get("title"),
+            "status": _TODO_STATUS.get(t.get("status") or "notStarted", t.get("status")),
+            "due": _due_local(t, c),
+            "importance": t.get("importance") if t.get("importance") != "normal" else None,
+            "reminder": from_graph(t.get("reminderDateTime"), c.tz) if t.get("isReminderOn") else None,
+        }
+    )
 
 
-def _planner_row(t: dict[str, Any], plan: str | None, bucket: str | None, me_id: str, names: dict[str, str], c: Call) -> dict[str, Any]:
+def _planner_row(
+    t: dict[str, Any], plan: str | None, bucket: str | None, me_id: str, names: dict[str, str], c: Call
+) -> dict[str, Any]:
     assigned = list((t.get("assignments") or {}))
     total, active = t.get("checklistItemCount") or 0, t.get("activeChecklistItemCount") or 0
-    return compact({
-        "id": t.get("id"), "source": "planner", "plan": plan, "bucket": bucket, "title": t.get("title"),
-        "status": _percent_status(t.get("percentComplete")), "due": from_graph(t.get("dueDateTime"), c.tz),
-        "priority": _priority_name(t.get("priority")), "mine": me_id in assigned,
-        "assignees": [names.get(a, "someone") for a in assigned[:5]],
-        "checklist": f"{total - active}/{total}" if total else None,
-    })
+    return compact(
+        {
+            "id": t.get("id"),
+            "source": "planner",
+            "plan": plan,
+            "bucket": bucket,
+            "title": t.get("title"),
+            "status": _percent_status(t.get("percentComplete")),
+            "due": from_graph(t.get("dueDateTime"), c.tz),
+            "priority": _priority_name(t.get("priority")),
+            "mine": me_id in assigned,
+            "assignees": [names.get(a, "someone") for a in assigned[:5]],
+            "checklist": f"{total - active}/{total}" if total else None,
+        }
+    )
 
 
 def _sort_key(row: dict[str, Any], now: str) -> tuple[int, str]:
@@ -137,7 +163,9 @@ async def _user_names(c: Call, ids: set[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for uid in list(ids)[:10]:
         try:
-            out[uid] = (await c.graph.get(f"/users/{uid}", params={"$select": "displayName"})).get("displayName") or "someone"
+            out[uid] = (await c.graph.get(f"/users/{uid}", params={"$select": "displayName"})).get(
+                "displayName"
+            ) or "someone"
         except Exception:  # a name that cannot be read is shown as "someone", never as a failure
             out[uid] = "someone"
     return out
@@ -159,15 +187,19 @@ async def _all_pages(c: Call, path: str, params: dict[str, Any], cut: list[bool]
 async def _lists_and_plans(c: Call, source: str, n: int, extra: dict[str, Any]) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     if source in ("all", "todo"):
-        items += [compact({"source": "todo", "name": x["displayName"], "default": x.get("wellknownListName") == "defaultList"})
-                  for x in await _lists(c)]
+        items += [
+            compact(
+                {"source": "todo", "name": x["displayName"], "default": x.get("wellknownListName") == "defaultList"}
+            )
+            for x in await _lists(c)
+        ]
     total = len(items)
     teams_cut: list[bool] = []
     if source in ("all", "planner"):
         plans = await _plans(c, teams_cut)
         total += len(plans)
         # Buckets cost a request per plan: only the plans that will be shown are asked.
-        for p in plans[:max(n - len(items), 0)]:
+        for p in plans[: max(n - len(items), 0)]:
             buckets = (await c.graph.get(f"/planner/plans/{p['id']}/buckets")).get("value", [])
             items.append({"source": "planner", "name": p["title"], "buckets": [b["name"] for b in buckets]})
     shown = items[:n]
@@ -181,7 +213,14 @@ async def _lists_and_plans(c: Call, source: str, n: int, extra: dict[str, Any]) 
     return out
 
 
-@tool(area="tasks", title="Find tasks, lists and plans", scopes=["Tasks.ReadWrite"], read_only=True, idempotent=True, returns_list=True)
+@tool(
+    area="tasks",
+    title="Find tasks, lists and plans",
+    scopes=["Tasks.ReadWrite"],
+    read_only=True,
+    idempotent=True,
+    returns_list=True,
+)
 async def list_tasks(
     source: Literal["all", "todo", "planner"] = "all",
     list: Annotated[str, Field(description="A To Do list, by name.")] = "",
@@ -219,11 +258,23 @@ async def list_tasks(
                     params["$filter"] = flt
                 if details:
                     params["$expand"] = "checklistItems"
-                rows += [{**_todo_row(t, lst["displayName"], c),
-                          **(_details((t.get("body") or {}).get("content"),
-                                      [(i.get("displayName") or "", i.get("isChecked") is True)
-                                       for i in t.get("checklistItems") or []]) if details else {})}
-                         for t in await _all_pages(c, f"/me/todo/lists/{lst['id']}/tasks", params, cut)]
+                rows += [
+                    {
+                        **_todo_row(t, lst["displayName"], c),
+                        **(
+                            _details(
+                                (t.get("body") or {}).get("content"),
+                                [
+                                    (i.get("displayName") or "", i.get("isChecked") is True)
+                                    for i in t.get("checklistItems") or []
+                                ],
+                            )
+                            if details
+                            else {}
+                        ),
+                    }
+                    for t in await _all_pages(c, f"/me/todo/lists/{lst['id']}/tasks", params, cut)
+                ]
         if source in ("all", "planner") and not list:
             me_id = (await c.graph.get("/me", params={"$select": "id"}))["id"]
             plans = await _plans(c)
@@ -247,7 +298,10 @@ async def list_tasks(
             if status != "all":
                 tasks = [t for t in tasks if (t.get("percentComplete") == 100) == (status == "completed")]
             names = await _user_names(c, {a for t in tasks[:50] for a in (t.get("assignments") or {})})
-            rows += [_planner_row(t, plan_by_id.get(t.get("planId")), bucket_by_id.get(t.get("bucketId")), me_id, names, c) for t in tasks]
+            rows += [
+                _planner_row(t, plan_by_id.get(t.get("planId")), bucket_by_id.get(t.get("bucketId")), me_id, names, c)
+                for t in tasks
+            ]
         if until:
             cutoff = until.astimezone(c.tz).isoformat(timespec="minutes")
             rows = [r for r in rows if r.get("due") and r["due"] < cutoff]
@@ -255,7 +309,7 @@ async def list_tasks(
             rows = [r for r in rows if query.casefold() in (r.get("title") or "").casefold()]
         now = datetime.now(c.tz).isoformat(timespec="minutes")
         rows.sort(key=lambda r: _sort_key(r, now))
-        page = rows[skip:skip + n]
+        page = rows[skip : skip + n]
         for row in page:
             # Fenced once filtered and sorted: a shared list or plan holds titles other people wrote.
             if row.get("title"):
@@ -266,13 +320,18 @@ async def list_tasks(
                 if row.get("source") == "planner":
                     d = await c.graph.get(f"/planner/tasks/{segment(row['id'])}/details")
                     items = sorted((d.get("checklist") or {}).values(), key=lambda i: i.get("orderHint") or "")
-                    row.update(_details(d.get("description"), [(i.get("title") or "", i.get("isChecked") is True)
-                                                                for i in items]))
+                    row.update(
+                        _details(
+                            d.get("description"), [(i.get("title") or "", i.get("isChecked") is True) for i in items]
+                        )
+                    )
         more = c.cursor_out({"skip": skip + n}) if len(rows) > skip + n else None
         out = page_result(page, more, **extra)
         if cut:
             out["truncated"] = True
-            out["note"] = f"Only the first {MAX_PAGES * 100} tasks of a list were read; narrow by list, plan or due_before."
+            out["note"] = (
+                f"Only the first {MAX_PAGES * 100} tasks of a list were read; narrow by list, plan or due_before."
+            )
         return out
 
 
@@ -284,7 +343,10 @@ async def _assignments(c: Call, names: list[str], me: dict[str, Any]) -> tuple[d
         if w.is_group:
             # Planner refused it as "does not exist"; mail, calendar and Teams name it.
             raise M365Error("distribution_list", address=w.address)
-        mine = w.address.casefold() in {(me.get("mail") or "").casefold(), (me.get("userPrincipalName") or "").casefold()}
+        mine = w.address.casefold() in {
+            (me.get("mail") or "").casefold(),
+            (me.get("userPrincipalName") or "").casefold(),
+        }
         uid = me["id"] if mine else (await c.graph.get(f"/users/{w.address}", params={"$select": "id"}))["id"]
         ids[uid] = ASSIGNMENT
         if not mine:
@@ -301,12 +363,15 @@ async def save_task(
     plan: Annotated[str, Field(description="Planner plan; needed to create.")] = "",
     bucket: Annotated[str, Field(description="Planner bucket.")] = "",
     due: Annotated[str, Field(description="e.g. 2026-10-31 17:00.")] = "",
-    reminder: Annotated[str, Field(description="To Do only, like due: the time of \"remind me\".")] = "",
+    reminder: Annotated[str, Field(description='To Do only, like due: the time of "remind me".')] = "",
     importance: Literal["low", "normal", "high"] | None = None,
     assignees: Annotated[list[str] | None, Field(description="Planner only; replaces the current ones.")] = None,
     notes: Annotated[str | None, Field(description="Description text.")] = None,
     checklist: Annotated[list[str] | None, Field(description="Items to add.")] = None,
-    status: Annotated[Literal["open", "in_progress", "completed"] | None, Field(description="completed ticks the task off; open reopens it.")] = None,
+    status: Annotated[
+        Literal["open", "in_progress", "completed"] | None,
+        Field(description="completed ticks the task off; open reopens it."),
+    ] = None,
     user_confirmed: Annotated[bool, Field(description="True when the person asked to assign others.")] = False,
 ) -> dict[str, Any]:
     """Create or change a task in To Do or in a Planner plan. Giving a Planner task to anyone but the
@@ -319,8 +384,10 @@ async def save_task(
     # Microsoft counts UTF-16 units: an emoji is two (QA: 208 characters with emoji were cut to 255 units).
     units = len(title.encode("utf-16-le")) // 2 if title else 0
     if units > MAX_TITLE:
-        raise invalid(f"A task title is at most {MAX_TITLE} characters; this one has {units} (emoji count as two). "
-                      "Shorten it and put the rest in notes. Nothing was saved.")
+        raise invalid(
+            f"A task title is at most {MAX_TITLE} characters; this one has {units} (emoji count as two). "
+            "Shorten it and put the rest in notes. Nothing was saved."
+        )
     if source == "todo" and (plan or bucket or assignees):
         raise invalid("plan, bucket and assignees belong to Planner tasks.")
     if source == "planner" and (list or reminder):
@@ -337,19 +404,39 @@ async def save_task(
         if assignees is not None:
             wanted, others = await _assignments(c, assignees, me)
             if others:  # a Planner assignment tells the assignee; nothing is written before this
-                receipt = c.guard(kind="assignment", user_confirmed=user_confirmed, recipients=len(others),
-                                  group_addresses=groups_among(others))
-        return {**await _save_planner(c, id, plan, bucket, title, due_dt, importance, wanted, notes, checklist, status), **receipt}
+                receipt = await c.guard(
+                    kind="assignment",
+                    user_confirmed=user_confirmed,
+                    recipients=len(others),
+                    group_addresses=groups_among(others),
+                )
+        return {
+            **await _save_planner(c, id, plan, bucket, title, due_dt, importance, wanted, notes, checklist, status),
+            **receipt,
+        }
 
 
-async def _save_todo(c: Call, id: str | None, list_q: str | None, title: str | None, due: Any, reminder: str | None,
-                     importance: str | None, notes: str | None, checklist: list[str] | None, status: str | None) -> dict[str, Any]:
+async def _save_todo(
+    c: Call,
+    id: str | None,
+    list_q: str | None,
+    title: str | None,
+    due: Any,
+    reminder: str | None,
+    importance: str | None,
+    notes: str | None,
+    checklist: list[str] | None,
+    status: str | None,
+) -> dict[str, Any]:
     lst = await _todo_list(c, list_q)
     fields: dict[str, Any] = compact({"title": title, "importance": importance})
     if due:
         fields["dueDateTime"] = {"dateTime": due.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": c.tz_name}
     if reminder:
-        fields["reminderDateTime"] = {"dateTime": parse(reminder, c.tz, field="reminder").strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": c.tz_name}
+        fields["reminderDateTime"] = {
+            "dateTime": parse(reminder, c.tz, field="reminder").strftime("%Y-%m-%dT%H:%M:%S"),
+            "timeZone": c.tz_name,
+        }
         fields["isReminderOn"] = True
     if notes is not None:
         fields["body"] = {"content": notes, "contentType": "text"}
@@ -370,9 +457,19 @@ async def _save_todo(c: Call, id: str | None, list_q: str | None, title: str | N
     return out
 
 
-async def _save_planner(c: Call, id: str | None, plan_q: str | None, bucket_q: str | None, title: str | None, due: Any,
-                        importance: str | None, wanted: dict[str, Any] | None, notes: str | None,
-                        checklist: list[str] | None, status: str | None) -> dict[str, Any]:
+async def _save_planner(
+    c: Call,
+    id: str | None,
+    plan_q: str | None,
+    bucket_q: str | None,
+    title: str | None,
+    due: Any,
+    importance: str | None,
+    wanted: dict[str, Any] | None,
+    notes: str | None,
+    checklist: list[str] | None,
+    status: str | None,
+) -> dict[str, Any]:
     current: dict[str, Any] = {}
     plan_id = None
     if id:
@@ -403,8 +500,14 @@ async def _save_planner(c: Call, id: str | None, plan_q: str | None, bucket_q: s
         if notes is not None:
             patch["description"] = notes
         if checklist:
-            patch["checklist"] = {str(uuid.uuid4()): {"@odata.type": "#microsoft.graph.plannerChecklistItem", "title": t, "isChecked": False}
-                                  for t in checklist}
+            patch["checklist"] = {
+                str(uuid.uuid4()): {
+                    "@odata.type": "#microsoft.graph.plannerChecklistItem",
+                    "title": t,
+                    "isChecked": False,
+                }
+                for t in checklist
+            }
         await c.graph.patch(f"/planner/tasks/{task_id}/details", patch, if_match=details.get("@odata.etag"))
     return {"saved": True, "id": task_id, "source": "planner"}
 

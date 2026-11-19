@@ -1,0 +1,31 @@
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "m365.fullname" . }}
+  labels: {{- include "m365.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "m365.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- with .Values.autoscaling.inFlightPerPod }}
+    # Requests being served per pod; needs the metric through a custom metrics API (prometheus-adapter).
+    - type: Pods
+      pods:
+        metric:
+          name: mcp_http_requests_in_flight
+        target:
+          type: AverageValue
+          averageValue: {{ . | quote }}
+    {{- end }}
+{{- end }}

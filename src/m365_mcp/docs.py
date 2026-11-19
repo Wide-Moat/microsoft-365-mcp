@@ -1,6 +1,6 @@
 """Render docs/tools.md from the registry, so the document cannot drift from the code.
 
-    python -m m365_mcp.docs > docs/tools.md
+python -m m365_mcp.docs > docs/tools.md
 """
 
 from __future__ import annotations
@@ -25,19 +25,32 @@ async def render() -> str:
             continue
         out += [f"## {area}" + ("" if default_on else " (off by default)"), ""]
         for s in tools:
-            flags = [f for f, on in (("read-only", s.read_only), ("notifies others", s.notifies_others),
-                                     ("irreversible", s.irreversible), ("idempotent", s.idempotent)) if on]
+            flags = [
+                f
+                for f, on in (
+                    ("read-only", s.read_only),
+                    ("notifies others", s.notifies_others),
+                    ("irreversible", s.irreversible),
+                    ("idempotent", s.idempotent),
+                )
+                if on
+            ]
             if s.switch:
                 flags.append(f"switch `{s.switch}`" + ("" if SWITCHES.get(s.switch) else " (off by default)"))
             for kind, gate in sorted({g for g in s.gates.values()}):
                 params = ", ".join(f"`{p}`" for p, g in s.gates.items() if g == (kind, gate))
                 flags.append(f"{params} only with {kind} `{gate}`")
-            out += [f"### `{s.name}` — {s.title}", "",
-                    f"{', '.join(flags) or 'writes'} · scopes: {', '.join(f'`{x}`' for x in s.scopes)} · "
-                    f"{tokens.get(s.name, 0)} tokens", "", s.description, ""]
+            out += [
+                f"### `{s.name}` — {s.title}",
+                "",
+                f"{', '.join(flags) or 'writes'} · scopes: {', '.join(f'`{x}`' for x in s.scopes)} · "
+                f"{tokens.get(s.name, 0)} tokens",
+                "",
+                s.description,
+                "",
+            ]
     return "\n".join(out).rstrip() + "\n"
 
 
 if __name__ == "__main__":
     print(asyncio.run(render()), end="")
-

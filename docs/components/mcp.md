@@ -6,8 +6,9 @@ The transport and the catalogue: what the model is offered and what it costs.
 
 Streamable HTTP from the official MCP Python SDK, stateless (no server-side session), JSON
 responses. One endpoint, `/mcp`. Health endpoints `/healthz` (process up) and `/readyz`
-(configuration valid). Link routes are mounted beside it but served on a separate listener so that
-the network policy can expose them alone.
+(configuration and key loaded; it reports the shared store and never waits for it), on this listener
+and on the metrics listener, where the probes point. Link routes are served on a separate listener
+so that an Ingress can publish them alone, and metrics on a third.
 
 ## Registry and areas
 

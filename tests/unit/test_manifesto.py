@@ -63,8 +63,12 @@ def test_every_area_scope_is_needed_by_a_tool_of_that_area():
     # Rule 18: get_connection tells the person which permissions an area needs; one that no tool of
     # the area declares is a scope asked for without a tool that needs it.
     for area, scopes in AREA_SCOPES.items():
-        needed = {s for spec in SPECS.values()
-                  if spec.area == area or ("area", area) in spec.gates.values() for s in spec.scopes}
+        needed = {
+            s
+            for spec in SPECS.values()
+            if spec.area == area or ("area", area) in spec.gates.values()
+            for s in spec.scopes
+        }
         assert needed, f"area {area} has no tool"
         assert set(scopes) <= needed, f"area {area} lists {sorted(set(scopes) - needed)} that no tool of it needs"
 
@@ -90,8 +94,21 @@ def _tracked_text_files() -> list[Path]:
 
 # Scripts a passage in another language is written in. Greek stays out: a symbol such as Ω or µ in a
 # unit is not a passage; signs such as º have no script name at all.
-_SCRIPTS = ("CYRILLIC", "ARABIC", "HEBREW", "CJK", "HIRAGANA", "KATAKANA", "HANGUL", "THAI", "DEVANAGARI",
-            "ARMENIAN", "GEORGIAN", "BENGALI", "TAMIL")
+_SCRIPTS = (
+    "CYRILLIC",
+    "ARABIC",
+    "HEBREW",
+    "CJK",
+    "HIRAGANA",
+    "KATAKANA",
+    "HANGUL",
+    "THAI",
+    "DEVANAGARI",
+    "ARMENIAN",
+    "GEORGIAN",
+    "BENGALI",
+    "TAMIL",
+)
 
 
 def test_the_repository_is_written_in_english():

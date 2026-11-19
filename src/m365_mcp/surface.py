@@ -17,8 +17,10 @@ import sys
 from pathlib import Path
 
 LOCK = Path(__file__).resolve().parents[2] / "tool-surface.lock.json"
-REGENERATE = ("If the change to the tool surface is intended, regenerate the lock and commit it: "
-              "python -m m365_mcp.surface > tool-surface.lock.json")
+REGENERATE = (
+    "If the change to the tool surface is intended, regenerate the lock and commit it: "
+    "python -m m365_mcp.surface > tool-surface.lock.json"
+)
 
 
 def _sha(value: object) -> str:
@@ -48,8 +50,13 @@ def drift(lock: dict, now: dict) -> list[str]:
     old, new = lock.get("tools", {}), now.get("tools", {})
     out = [f"{n}: not in the lock" for n in sorted(set(new) - set(old))]
     out += [f"{n}: in the lock but no longer registered" for n in sorted(set(old) - set(new))]
-    labels = {"area": "area", "switch": "switch", "gates": "gated parameters", "annotations": "annotations",
-              "input_schema_sha256": "input schema"}
+    labels = {
+        "area": "area",
+        "switch": "switch",
+        "gates": "gated parameters",
+        "annotations": "annotations",
+        "input_schema_sha256": "input schema",
+    }
     for n in sorted(set(old) & set(new)):
         out += [f"{n}: {label} changed" for key, label in labels.items() if old[n].get(key) != new[n].get(key)]
     return out

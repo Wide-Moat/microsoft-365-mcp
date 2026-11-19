@@ -1,6 +1,6 @@
 [project]
 name = "m365-mcp"
-version = "0.1.0"
+version = "0.2.0"
 license = "Apache-2.0"
 description = "MCP server for one person's Microsoft 365 through Microsoft Graph"
 requires-python = ">=3.12"
@@ -13,6 +13,7 @@ dependencies = [
   "cryptography>=50.0.2",
   "uvicorn==0.54.0",
   "prometheus-client>=0.26.0",
+  "redis==8.1.0",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +22,7 @@ test = [
   "pytest-asyncio==1.4.1",
   "respx==0.23.1",
   "tiktoken==0.14.0",
+  "ruff==0.17.5",
 ]
 
 [build-system]
@@ -36,3 +38,21 @@ testpaths = ["tests"]
 pythonpath = ["src", "tests"]
 markers = ["live: talks to a real Microsoft 365 test tenant; never runs in CI"]
 addopts = "-m 'not live' --strict-markers"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle errors and warnings, import order, and the async pitfalls.
+select = ["E", "F", "W", "I", "ASYNC"]
+# E501: lines are wrapped by the formatter where it can; descriptions and test data stay readable whole.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# A hand-run probe against a real tenant: its waits take a deadline argument on purpose.
+"tests/live/**" = ["ASYNC109"]
+
+[tool.ruff.format]
+quote-style = "double"

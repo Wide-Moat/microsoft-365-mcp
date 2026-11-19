@@ -33,11 +33,13 @@ def _attr(tag: str, name: str) -> str | None:
     return unescape(m.group(1)) if m else None
 
 
-def _resources(html: str, c: Call) -> list[dict[str, Any]]:
+async def _resources(html: str, c: Call) -> list[dict[str, Any]]:
     out, seen = [], set()
     for i, tag in enumerate(_TAG.findall(html), 1):
         # The full-resolution copy is preferred over the page-sized one.
-        m = _RESOURCE.search(_attr(tag, "data-fullres-src") or "") or _RESOURCE.search(_attr(tag, "src") or _attr(tag, "data") or "")
+        m = _RESOURCE.search(_attr(tag, "data-fullres-src") or "") or _RESOURCE.search(
+            _attr(tag, "src") or _attr(tag, "data") or ""
+        )
         if not m or m.group(1) in seen:
             continue
         seen.add(m.group(1))
@@ -46,8 +48,10 @@ def _resources(html: str, c: Call) -> list[dict[str, Any]]:
         if not name:
             kind = "image"
             name = f"image-{i}" + _EXT.get(_attr(tag, "data-src-type") or "", "")
-        url = c.link(op="d", kind="note_resource", target={"r": m.group(1), "n": name})
-        out.append({"name": name, "kind": kind, "download": f"curl -sS --fail-with-body -o {_shell_name(name)} '{url}'"})
+        url = await c.link(op="d", kind="note_resource", target={"r": m.group(1), "n": name})
+        out.append(
+            {"name": name, "kind": kind, "download": f"curl -sS --fail-with-body -o {_shell_name(name)} '{url}'"}
+        )
     return out
 
 
@@ -66,14 +70,20 @@ async def _missing(c: Call, page: str, e: GraphError) -> M365Error | GraphError:
         await c.graph.get(f"/me/onenote/pages/{page}", params={"$select": "id"})
     except GraphError:
         return e
-    return M365Error("unsupported", reason=(
-        "OneNote lists this page but does not open it: Microsoft 365 answers that its content does not exist. "
-        "A page made seconds ago can take a moment; if this persists, it is on OneNote's side. Open it in "
-        "OneNote to read, change or delete it. Nothing was changed."))
+    return M365Error(
+        "unsupported",
+        reason=(
+            "OneNote lists this page but does not open it: Microsoft 365 answers that its content does not exist. "
+            "A page made seconds ago can take a moment; if this persists, it is on OneNote's side. Open it in "
+            "OneNote to read, change or delete it. Nothing was changed."
+        ),
+    )
 
 
 async def _notebook(c: Call, query: str) -> dict[str, Any]:
-    books = (await c.graph.get("/me/onenote/notebooks", params={"$select": "id,displayName", "$top": "100"})).get("value", [])
+    books = (await c.graph.get("/me/onenote/notebooks", params={"$select": "id,displayName", "$top": "100"})).get(
+        "value", []
+    )
     return one(query, books, kind="notebook", name=lambda b: b["displayName"])
 
 
@@ -87,12 +97,20 @@ async def _section(c: Call, query: str, notebook: str | None) -> dict[str, Any]:
     return one(query, secs, kind="section", name=lambda s: s["displayName"])
 
 
-@tool(area="notes", title="List OneNote notebooks and pages", scopes=["Notes.ReadWrite"], read_only=True, idempotent=True,
-      returns_list=True)
+@tool(
+    area="notes",
+    title="List OneNote notebooks and pages",
+    scopes=["Notes.ReadWrite"],
+    read_only=True,
+    idempotent=True,
+    returns_list=True,
+)
 async def list_notes(
     notebook: Annotated[str | None, Field(description="A notebook by name: lists its sections.")] = None,
     section: Annotated[str | None, Field(description="A section by name: lists its pages, newest first.")] = None,
-    query: Annotated[str | None, Field(description="Words in a page title; searches all pages, or those of the section.")] = None,
+    query: Annotated[
+        str | None, Field(description="Words in a page title; searches all pages, or those of the section.")
+    ] = None,
     limit: int = 10,
     cursor: Annotated[str | None, Field(description="From the previous page's result.")] = None,
 ) -> dict[str, Any]:
@@ -120,8 +138,11 @@ async def list_notes(
             nb = await _notebook(c, notebook)
             base, params, skip = f"/me/onenote/notebooks/{nb['id']}/sections", {"$select": "id,displayName"}, 0
         else:
-            base, params, skip = "/me/onenote/notebooks", {
-                "$select": "id,displayName", "$expand": "sections($select=displayName)"}, 0
+            base, params, skip = (
+                "/me/onenote/notebooks",
+                {"$select": "id,displayName", "$expand": "sections($select=displayName)"},
+                0,
+            )
         # Measured: OneNote sends no @odata.nextLink once $top is given, and honours $skip. One item
         # more than the page tells whether there is a next one.
         page = await c.graph.page(base, params={**params, "$top": str(n + 1), **({"$skip": str(skip)} if skip else {})})
@@ -130,11 +151,24 @@ async def list_notes(
         for x in page.items[:n]:
             if "title" in x:
                 # A shared notebook holds pages other people named: the title is fenced, the placeholder not.
-                items.append(compact({"id": x.get("id"), "title": content_line("a OneNote page", x["title"]) if x.get("title") else "(untitled)",
-                                      "modified": from_graph(x.get("lastModifiedDateTime"), c.tz)}))
+                items.append(
+                    compact(
+                        {
+                            "id": x.get("id"),
+                            "title": content_line("a OneNote page", x["title"]) if x.get("title") else "(untitled)",
+                            "modified": from_graph(x.get("lastModifiedDateTime"), c.tz),
+                        }
+                    )
+                )
             else:
-                items.append(compact({"notebook" if "sections" in x else "section": x.get("displayName"),
-                                      "sections": [s.get("displayName") for s in x.get("sections") or []]}))
+                items.append(
+                    compact(
+                        {
+                            "notebook" if "sections" in x else "section": x.get("displayName"),
+                            "sections": [s.get("displayName") for s in x.get("sections") or []],
+                        }
+                    )
+                )
         nxt = {"path": base, "params": params, "skip": skip + n} if more else None
         return page_result(items, c.cursor_out(nxt), **extra)
 
@@ -160,21 +194,38 @@ async def get_note_page(
         found = _title_of(html)
         title = content_line("the OneNote page", found) if found else "(untitled)"
         text, cut = cap(html_to_text(html), max_chars)
-        return compact({"id": id, "title": title, "text": content_block("OneNote page", text), **cut,
-                        "resources": _resources(html, c)})
+        return compact(
+            {
+                "id": id,
+                "title": title,
+                "text": content_block("OneNote page", text),
+                **cut,
+                "resources": await _resources(html, c),
+            }
+        )
 
 
 @tool(area="notes", title="Write a OneNote page", scopes=["Notes.ReadWrite"])
 async def save_note_page(
-    title: Annotated[str | None, Field(description="The page title; required to create, changes it on an existing page.")] = None,
+    title: Annotated[
+        str | None, Field(description="The page title; required to create, changes it on an existing page.")
+    ] = None,
     body: Annotated[str | None, Field(description="Short text or HTML. A long page goes through body_upload.")] = None,
     id: Annotated[str | None, Field(description="A page id from list_notes, to change it. Omit to create.")] = None,
     section: Annotated[str | None, Field(description="The section, by name, for a new page.")] = None,
     notebook: Annotated[str | None, Field(description="The notebook, when the section name exists in several.")] = None,
-    body_format: Annotated[Literal["text", "html"], Field(description="text makes paragraphs only; lists and tables need html.")] = "text",
-    action: Annotated[Literal["create", "append", "prepend"] | None, Field(
-        description="create makes a page and takes no id. With id, say append or prepend; omitted, a title alone renames.")] = None,
-    body_upload: Annotated[bool, Field(description="Return a link to upload the body as an HTML file instead.")] = False,
+    body_format: Annotated[
+        Literal["text", "html"], Field(description="text makes paragraphs only; lists and tables need html.")
+    ] = "text",
+    action: Annotated[
+        Literal["create", "append", "prepend"] | None,
+        Field(
+            description="create makes a page and takes no id. With id, say append or prepend; omitted, a title alone renames."
+        ),
+    ] = None,
+    body_upload: Annotated[
+        bool, Field(description="Return a link to upload the body as an HTML file instead.")
+    ] = False,
 ) -> dict[str, Any]:
     """Create a OneNote page in a section, add to the end or top of one, or rename it (id and title
     alone). HTML is cleaned of anything active; images and files cannot be added. Read the page
@@ -185,8 +236,10 @@ async def save_note_page(
         action = "title"  # a title alone renames the page, as the schema says
     if action == "create" and id:
         # Said explicitly, create with an id renamed the page in silence.
-        raise invalid("create makes a new page and takes no id. To change this page give append or prepend, "
-                      "or the title alone to rename it. Nothing was changed.")
+        raise invalid(
+            "create makes a new page and takes no id. To change this page give append or prepend, "
+            "or the title alone to rename it. Nothing was changed."
+        )
     if action is None:
         if id:
             raise invalid("To change a page give action append or prepend, or the title alone to rename it.")
@@ -206,11 +259,17 @@ async def save_note_page(
         sec = await _section(c, section, notebook) if section else None
         if body_upload:
             target = {"s": sec["id"], "title": title or "Untitled"} if action == "create" else {"page": id, "a": action}
-            url = c.link(op="u", kind="note_body", target=target, max_bytes=MAX_NOTE_UPLOAD, content_type="text/html")
+            url = await c.link(
+                op="u", kind="note_body", target=target, max_bytes=MAX_NOTE_UPLOAD, content_type="text/html"
+            )
             # The field is the command and nothing else, so it runs as issued.
-            return {"body_upload": f"curl -sS --fail-with-body -T page.html -H 'Content-Type: text/html; charset=utf-8' '{url}'",
-                    "body_upload_note": ("Write the page to page.html, then run body_upload as it is. The server "
-                                         "cleans the HTML and reports what it changed.")}
+            return {
+                "body_upload": f"curl -sS --fail-with-body -T page.html -H 'Content-Type: text/html; charset=utf-8' '{url}'",
+                "body_upload_note": (
+                    "Write the page to page.html, then run body_upload as it is. The server "
+                    "cleans the HTML and reports what it changed."
+                ),
+            }
         prepared = None
         if body is not None:
             prepared = prepare_outgoing(body if body_format == "html" else text_to_html(body))
@@ -220,8 +279,13 @@ async def save_note_page(
                 raise invalid("Embedded images cannot be added to a OneNote page from here. Remove them from the body.")
         if action == "create":
             doc = f"<!DOCTYPE html><html><head><title>{escape(title or '')}</title></head><body>{prepared.html if prepared else ''}</body></html>"
-            resp = await c.graph.request("POST", f"/me/onenote/sections/{sec['id']}/pages", content=doc.encode(),
-                                         headers={"Content-Type": "text/html"}, retry_server_errors=False)
+            resp = await c.graph.request(
+                "POST",
+                f"/me/onenote/sections/{sec['id']}/pages",
+                content=doc.encode(),
+                headers={"Content-Type": "text/html"},
+                retry_server_errors=False,
+            )
             page = resp.json()
             out: dict[str, Any] = {"created": True, "id": page.get("id"), "title": title}
         else:
@@ -243,7 +307,9 @@ async def save_note_page(
 @tool(area="notes", title="Delete a OneNote page", scopes=["Notes.ReadWrite"], irreversible=True)
 async def delete_note_page(
     id: Annotated[str, Field(description="The page id from list_notes.")],
-    user_confirmed: Annotated[bool, Field(description="True only when the person explicitly asked to delete this page.")] = False,
+    user_confirmed: Annotated[
+        bool, Field(description="True only when the person explicitly asked to delete this page.")
+    ] = False,
 ) -> dict[str, Any]:
     """Remove a single page from the person's OneNote notebook. OneNote may not keep a deleted page, so
     this cannot be undone. Ask first, then set user_confirmed."""

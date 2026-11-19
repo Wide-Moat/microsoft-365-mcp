@@ -64,11 +64,14 @@ def test_a_rule_the_manifesto_does_not_have_is_a_problem():
     assert any("rule 11: the manifesto has no such rule" in p for p in _check(GOOD + [(11, "`test_a.py::test_one`")]))
 
 
-@pytest.mark.parametrize("holder, needle", [
-    ("`test_a.py::test_gone`", "not in the collected suite"),
-    ("`tests/unit/test_a.py::test_one`", "not a test id"),
-    ("`ci: a step nobody wrote`", "no job or step"),
-])
+@pytest.mark.parametrize(
+    "holder, needle",
+    [
+        ("`test_a.py::test_gone`", "not in the collected suite"),
+        ("`tests/unit/test_a.py::test_one`", "not a test id"),
+        ("`ci: a step nobody wrote`", "no job or step"),
+    ],
+)
 def test_a_holder_that_does_not_exist_is_a_problem(holder, needle):
     assert any(needle in p for p in _check([(1, holder)] + GOOD[1:]))
 
@@ -78,6 +81,8 @@ def test_reading_no_rules_is_a_problem():
 
 
 def test_ci_names_are_jobs_and_steps_not_events():
-    workflow = ("name: validate\non:\n  push:\n    branches: [main]\n  pull_request:\n"
-                "jobs:\n  purity:\n    uses: x\n  tests:\n    steps:\n      - name: the tests pass\n        run: pytest\n")
+    workflow = (
+        "name: validate\non:\n  push:\n    branches: [main]\n  pull_request:\n"
+        "jobs:\n  purity:\n    uses: x\n  tests:\n    steps:\n      - name: the tests pass\n        run: pytest\n"
+    )
     assert manifesto_map.ci_names(workflow) == {"purity", "tests", "the tests pass"}

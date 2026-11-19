@@ -8,10 +8,17 @@ TOOLS = {"list_bookings", "save_booking", "cancel_booking"}
 
 
 def business(graph):
-    graph.on("GET", "/solutions/bookingBusinesses", {"value": [{"id": BIZ, "displayName": "Salon", "email": "salon@x.test"}]})
-    graph.on("GET", f"/solutions/bookingBusinesses/{BIZ}/services", {"value": [
-        {"id": "svc1", "displayName": "Haircut", "defaultDuration": "PT1H30M"}]})
-    graph.on("GET", f"/solutions/bookingBusinesses/{BIZ}/staffMembers", {"value": [{"id": "st1", "displayName": "Ida"}]})
+    graph.on(
+        "GET", "/solutions/bookingBusinesses", {"value": [{"id": BIZ, "displayName": "Salon", "email": "salon@x.test"}]}
+    )
+    graph.on(
+        "GET",
+        f"/solutions/bookingBusinesses/{BIZ}/services",
+        {"value": [{"id": "svc1", "displayName": "Haircut", "defaultDuration": "PT1H30M"}]},
+    )
+    graph.on(
+        "GET", f"/solutions/bookingBusinesses/{BIZ}/staffMembers", {"value": [{"id": "st1", "displayName": "Ida"}]}
+    )
 
 
 async def test_bookings_are_off_by_default(settings, token):
@@ -25,11 +32,31 @@ async def test_list_businesses_then_appointments_in_a_window(graph, invoke):
     business(graph)
     r = await invoke("list_bookings")
     assert r.data["items"] == [{"business": "Salon", "email": "salon@x.test"}]
-    graph.on("GET", f"/solutions/bookingBusinesses/{BIZ}/calendarView", {"value": [{
-        "id": "a1", "customerName": "Kim", "customerEmailAddress": "kim@x.test", "serviceName": "Haircut",
-        "startDateTime": {"dateTime": "2026-10-23T14:00:00", "timeZone": "UTC"},
-        "endDateTime": {"dateTime": "2026-10-23T15:30:00", "timeZone": "UTC"}, "staffMemberIds": ["st1"]}]})
-    r = await invoke("list_bookings", business="salon", start="2026-10-23", end="2026-10-24", include_services=True, include_staff=True)
+    graph.on(
+        "GET",
+        f"/solutions/bookingBusinesses/{BIZ}/calendarView",
+        {
+            "value": [
+                {
+                    "id": "a1",
+                    "customerName": "Kim",
+                    "customerEmailAddress": "kim@x.test",
+                    "serviceName": "Haircut",
+                    "startDateTime": {"dateTime": "2026-10-23T14:00:00", "timeZone": "UTC"},
+                    "endDateTime": {"dateTime": "2026-10-23T15:30:00", "timeZone": "UTC"},
+                    "staffMemberIds": ["st1"],
+                }
+            ]
+        },
+    )
+    r = await invoke(
+        "list_bookings",
+        business="salon",
+        start="2026-10-23",
+        end="2026-10-24",
+        include_services=True,
+        include_staff=True,
+    )
     assert not r.error, r.text
     a = r.data["items"][0]
     assert a["customer"] == "Kim" and a["start"] == "2026-10-23T14:00+00:00" and a["staff"] == 1
@@ -42,21 +69,42 @@ async def test_list_businesses_then_appointments_in_a_window(graph, invoke):
 
 async def test_booking_without_confirmation_writes_nothing(graph, invoke):
     business(graph)
-    r = await invoke("save_booking", business="Salon", service="Haircut", start="2026-10-23 15:00",
-                     customer_name="Kim", customer_email="kim@x.test")
+    r = await invoke(
+        "save_booking",
+        business="Salon",
+        service="Haircut",
+        start="2026-10-23 15:00",
+        customer_name="Kim",
+        customer_email="kim@x.test",
+    )
     assert r.error and "user_confirmed" in r.text and graph.writes() == []
 
 
 async def test_booking_creates_the_appointment_with_the_service_length(graph, invoke):
     business(graph)
     graph.on("POST", f"/solutions/bookingBusinesses/{BIZ}/appointments", {"id": "a9"}, status=201)
-    r = await invoke("save_booking", business="Salon", service="hair", start="2026-10-23 15:00", customer_name="Kim",
-                     customer_email="kim@x.test", staff=["Ida"], notes="first visit", user_confirmed=True)
+    r = await invoke(
+        "save_booking",
+        business="Salon",
+        service="hair",
+        start="2026-10-23 15:00",
+        customer_name="Kim",
+        customer_email="kim@x.test",
+        staff=["Ida"],
+        notes="first visit",
+        user_confirmed=True,
+    )
     assert not r.error and r.data["id"] == "a9" and r.data["kind"] == "booking", r.text
     assert graph.writes()[0].json == {
-        "customerName": "Kim", "customerEmailAddress": "kim@x.test", "customerNotes": "first visit",
-        "startDateTime": {"dateTime": "2026-10-23T15:00:00", "timeZone": "UTC"}, "serviceId": "svc1", "serviceName": "Haircut",
-        "endDateTime": {"dateTime": "2026-10-23T16:30:00", "timeZone": "UTC"}, "staffMemberIds": ["st1"]}
+        "customerName": "Kim",
+        "customerEmailAddress": "kim@x.test",
+        "customerNotes": "first visit",
+        "startDateTime": {"dateTime": "2026-10-23T15:00:00", "timeZone": "UTC"},
+        "serviceId": "svc1",
+        "serviceName": "Haircut",
+        "endDateTime": {"dateTime": "2026-10-23T16:30:00", "timeZone": "UTC"},
+        "staffMemberIds": ["st1"],
+    }
 
 
 async def test_a_new_booking_needs_service_and_customer(graph, invoke):
@@ -91,9 +139,16 @@ APPT = f"/solutions/bookingBusinesses/{BIZ}/appointments/a1"
 
 
 def existing(graph):
-    graph.on("GET", APPT, {"id": "a1", "serviceName": "Haircut",
-                           "startDateTime": {"dateTime": "2026-10-23T14:00:00.0000000", "timeZone": "UTC"},
-                           "endDateTime": {"dateTime": "2026-10-23T16:00:00.0000000", "timeZone": "UTC"}})
+    graph.on(
+        "GET",
+        APPT,
+        {
+            "id": "a1",
+            "serviceName": "Haircut",
+            "startDateTime": {"dateTime": "2026-10-23T14:00:00.0000000", "timeZone": "UTC"},
+            "endDateTime": {"dateTime": "2026-10-23T16:00:00.0000000", "timeZone": "UTC"},
+        },
+    )
     graph.on("PATCH", APPT, None, status=204)
 
 
@@ -102,8 +157,10 @@ async def test_moving_a_booking_keeps_its_length(graph, invoke):
     existing(graph)
     r = await invoke("save_booking", business="Salon", id="a1", start="2026-10-24 10:00", user_confirmed=True)
     assert not r.error, r.text
-    assert graph.writes()[0].json == {"startDateTime": {"dateTime": "2026-10-24T10:00:00", "timeZone": "UTC"},
-                                      "endDateTime": {"dateTime": "2026-10-24T12:00:00", "timeZone": "UTC"}}
+    assert graph.writes()[0].json == {
+        "startDateTime": {"dateTime": "2026-10-24T10:00:00", "timeZone": "UTC"},
+        "endDateTime": {"dateTime": "2026-10-24T12:00:00", "timeZone": "UTC"},
+    }
 
 
 async def test_changing_notes_needs_no_start(graph, invoke):
@@ -116,14 +173,22 @@ async def test_changing_notes_needs_no_start(graph, invoke):
 
 async def test_a_new_booking_needs_a_start(graph, invoke):
     business(graph)
-    r = await invoke("save_booking", business="Salon", service="Haircut", customer_name="Kim",
-                     customer_email="kim@x.test", user_confirmed=True)
+    r = await invoke(
+        "save_booking",
+        business="Salon",
+        service="Haircut",
+        customer_name="Kim",
+        customer_email="kim@x.test",
+        user_confirmed=True,
+    )
     assert r.error and "start" in r.text and graph.writes() == []
 
 
 async def test_list_bookings_accepts_either_read_permission(graph, token, invoke):
-    from m365_mcp.identity import current_token
     from helpers import make_token
+
+    from m365_mcp.identity import current_token
+
     business(graph)
     for scope in ("Bookings.Read.All", "BookingsAppointment.ReadWrite.All"):
         tok = current_token.set(make_token(scope))

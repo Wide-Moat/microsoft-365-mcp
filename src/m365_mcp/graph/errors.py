@@ -8,8 +8,16 @@ from m365_mcp.core.errors import M365Error
 
 
 class GraphError(Exception):
-    def __init__(self, status: int, code: str, request_id: str, retry_after: int | None = None,
-                 missing_scope: str | None = None, inner_code: str = "", method: str = "") -> None:
+    def __init__(
+        self,
+        status: int,
+        code: str,
+        request_id: str,
+        retry_after: int | None = None,
+        missing_scope: str | None = None,
+        inner_code: str = "",
+        method: str = "",
+    ) -> None:
         self.status = status
         self.code = code
         self.request_id = request_id
@@ -31,10 +39,15 @@ def scope_from_message(message: str) -> str | None:
 
 # Ids Graph could not parse. Each service says it its own way; all of them mean the same to the person
 # as an id that parses and is not there (rule 11): it does not exist, or it is not shared with you.
-INVALID_ID_CODES = frozenset({
-    "ErrorInvalidIdMalformed", "ErrorInvalidId", "ErrorInvalidIdEmpty", "ErrorInvalidIdNotAnItemAttachmentId",
-    "20112",  # OneNote: invalid entity id
-})
+INVALID_ID_CODES = frozenset(
+    {
+        "ErrorInvalidIdMalformed",
+        "ErrorInvalidId",
+        "ErrorInvalidIdEmpty",
+        "ErrorInvalidIdNotAnItemAttachmentId",
+        "20112",  # OneNote: invalid entity id
+    }
+)
 # A 401 that is the token's own fault. Others come from one service with a valid token: OneNote
 # answers 401 "40001" for a person who has no OneNote; Teams answers 401 TenantNotFound for a chat
 # member who is no user here. Telling those people to reconnect sends them round in a circle.
@@ -45,7 +58,10 @@ def to_person_error(e: GraphError, *, read_only: bool = False) -> M365Error:
     code = e.code or ""
     inner = e.inner_code or ""
     if code == "invalidRequestPath":
-        return M365Error("invalid", reason="An id or path in this request is empty or not valid. Use the ids and paths the tools returned.")
+        return M365Error(
+            "invalid",
+            reason="An id or path in this request is empty or not valid. Use the ids and paths the tools returned.",
+        )
     if e.status == 401 and inner == "TenantNotFound":
         return M365Error("unreachable")
     if e.status == 401 and code.casefold() not in TOKEN_CODES:
@@ -63,8 +79,9 @@ def to_person_error(e: GraphError, *, read_only: bool = False) -> M365Error:
         return M365Error("forbidden")
     if e.status == 404 or code in {"ErrorItemNotFound", "itemNotFound", "ResourceNotFound"}:
         return M365Error("not_found")
-    if e.status == 400 and (code in INVALID_ID_CODES or inner in INVALID_ID_CODES
-                            or (inner == "ParsingFailed" and e.method == "GET")):
+    if e.status == 400 and (
+        code in INVALID_ID_CODES or inner in INVALID_ID_CODES or (inner == "ParsingFailed" and e.method == "GET")
+    ):
         return M365Error("not_found")
     if e.status == 409 and code in {"nameAlreadyExists", "ErrorFolderExists"}:
         return M365Error("invalid", reason="An item with that name already exists there.")

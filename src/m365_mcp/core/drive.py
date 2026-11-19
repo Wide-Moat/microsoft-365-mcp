@@ -16,8 +16,10 @@ from m365_mcp.core.errors import M365Error, invalid
 from m365_mcp.core.resolve import one
 from m365_mcp.graph.errors import GraphError
 
-ITEM_SELECT = ("id,name,size,webUrl,file,folder,package,createdDateTime,createdBy,lastModifiedDateTime,"
-               "lastModifiedBy,parentReference")
+ITEM_SELECT = (
+    "id,name,size,webUrl,file,folder,package,createdDateTime,createdBy,lastModifiedDateTime,"
+    "lastModifiedBy,parentReference"
+)
 _BAD_ID = re.compile(r"[\s/\\?#%]")
 SITE_SELECT = "id,displayName,webUrl,description"
 MAX_TEAMS = 20  # teams whose sites are read; each costs one request
@@ -48,8 +50,9 @@ def path_url(drive: str | None, path: str) -> str:
     return f"{root(drive)}/root:/{quote(p)}" if p else f"{root(drive)}/root"
 
 
-async def find(c: Call, item_id: str | None, path: str | None, drive: str | None,
-               select: str = ITEM_SELECT) -> dict[str, Any]:
+async def find(
+    c: Call, item_id: str | None, path: str | None, drive: str | None, select: str = ITEM_SELECT
+) -> dict[str, Any]:
     """One drive item by id, or by path in the drive. Returns Graph's object."""
     if item_id:
         return await c.graph.get(item_url(drive, item_id), params={"$select": select})
@@ -128,8 +131,9 @@ async def site(c: Call, query: str) -> dict[str, Any]:
         return {"id": q, "displayName": q}
     if q.startswith("https://"):
         parts = urlsplit(q)
-        return await c.graph.get(f"/sites/{parts.hostname}:{parts.path.rstrip('/')}",
-                                 params={"$select": "id,displayName,webUrl"})
+        return await c.graph.get(
+            f"/sites/{parts.hostname}:{parts.path.rstrip('/')}", params={"$select": "id,displayName,webUrl"}
+        )
     known = [s for s in await known_sites(c) if q.casefold() in (s.get("displayName") or "").casefold()]
     hits = [s for s in known if (s.get("displayName") or "").casefold() == q.casefold()]
     if not hits:
@@ -138,10 +142,19 @@ async def site(c: Call, query: str) -> dict[str, Any]:
         hits = list({s["id"]: s for s in [*known, *found] if s.get("id")}.values())
         if not answered and not known:
             # Not "no site matches": Search did not answer, so it is not known whether one does.
-            raise M365Error("unsupported", reason=(
-                "No site you follow or of your teams matches, and Microsoft Search did not answer, so other sites "
-                "cannot be looked up now. Give the site's address instead."))
+            raise M365Error(
+                "unsupported",
+                reason=(
+                    "No site you follow or of your teams matches, and Microsoft Search did not answer, so other sites "
+                    "cannot be looked up now. Give the site's address instead."
+                ),
+            )
     if len(hits) == 1:
         return hits[0]
-    return one(q, hits, kind="site", name=lambda s: s.get("displayName") or "",
-               label=lambda s: f"{s.get('displayName')} ({s.get('webUrl')})")
+    return one(
+        q,
+        hits,
+        kind="site",
+        name=lambda s: s.get("displayName") or "",
+        label=lambda s: f"{s.get('displayName')} ({s.get('webUrl')})",
+    )

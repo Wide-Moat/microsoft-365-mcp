@@ -27,6 +27,7 @@ def test_the_lock_is_the_exact_output_of_the_generator():
 def test_the_lock_is_not_empty():
     tools = current()["tools"]
     from m365_mcp.registry import all_tools
+
     assert len(tools) == len(all_tools()) > 30
 
 

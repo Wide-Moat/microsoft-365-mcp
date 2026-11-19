@@ -20,10 +20,19 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from m365_mcp.config import LINK_TTL_CAP
 from m365_mcp.links.store import LinkStore
 
-KINDS = frozenset({
-    "attachment", "drive", "recording", "transcript", "note_resource",
-    "draft_body", "draft_attachment", "drive_upload", "note_body",
-})
+KINDS = frozenset(
+    {
+        "attachment",
+        "drive",
+        "recording",
+        "transcript",
+        "note_resource",
+        "draft_body",
+        "draft_attachment",
+        "drive_upload",
+        "note_body",
+    }
+)
 DOWNLOAD_KINDS = frozenset({"attachment", "drive", "recording", "transcript", "note_resource"})
 UPLOAD_KINDS = KINDS - DOWNLOAD_KINDS
 
@@ -60,8 +69,9 @@ class Link:
 
 
 class LinkSigner:
-    def __init__(self, sign_keys: tuple[bytes, ...], enc_keys: tuple[bytes, ...],
-                 store: LinkStore | None = None) -> None:
+    def __init__(
+        self, sign_keys: tuple[bytes, ...], enc_keys: tuple[bytes, ...], store: LinkStore | None = None
+    ) -> None:
         if not sign_keys or not enc_keys or any(len(k) < 32 for k in sign_keys + enc_keys):
             # Fail closed: a signer without keys is not a signer.
             raise ValueError("link keys are required")
@@ -76,9 +86,20 @@ class LinkSigner:
     def _mac(self, key: bytes, payload: bytes) -> str:
         return _b64(hmac.new(key, payload, hashlib.sha256).digest()[:16])
 
-    def issue(self, *, op: str, kind: str, target: dict[str, Any], person: str, token: str,
-              token_expires: int, ttl: int, max_bytes: int | None = None,
-              content_type: str | None = None, now: float | None = None) -> str:
+    async def issue(
+        self,
+        *,
+        op: str,
+        kind: str,
+        target: dict[str, Any],
+        person: str,
+        token: str,
+        token_expires: int,
+        ttl: int,
+        max_bytes: int | None = None,
+        content_type: str | None = None,
+        now: float | None = None,
+    ) -> str:
         if op not in ("d", "u") or kind not in KINDS:
             raise ValueError("bad link")
         if (op == "d") != (kind in DOWNLOAD_KINDS):
@@ -96,37 +117,37 @@ class LinkSigner:
         value = f"{_b64(payload)}.{self._mac(self._sign[0], payload)}"
         if self._store is None:
             return value
-        return self._store.put(value, expires=exp, owner=person, tag=draft_tag(person, kind, target))
+        return await self._store.put(value, expires=exp, owner=person, tag=draft_tag(person, kind, target))
 
-    def revoke_draft(self, person: str, draft_id: str) -> int:
+    async def revoke_draft(self, person: str, draft_id: str) -> int:
         """A draft that is being sent takes no more uploads: its body and attachment links are spent."""
-        return self._uses.revoke(draft_tag(person, "draft_body", {"d": draft_id}))
+        return await self._uses.revoke(draft_tag(person, "draft_body", {"d": draft_id}))
 
-    def draft_busy(self, person: str, draft_id: str) -> bool:
+    async def draft_busy(self, person: str, draft_id: str) -> bool:
         """An upload into this draft (its body or a file) is running now."""
-        return self._uses.busy_under(draft_tag(person, "draft_body", {"d": draft_id}))
+        return await self._uses.busy_under(draft_tag(person, "draft_body", {"d": draft_id}))
 
     @staticmethod
     def _use_key(value: str) -> str:
         # A short id is its own key; a full signed value is long, so its digest stands for it.
         return value if "." not in value else hashlib.sha256(value.encode()).hexdigest()
 
-    def claim(self, value: str) -> bool:
+    async def claim(self, value: str) -> bool:
         """Start an upload on this link; False while another one runs on it or after one delivered."""
-        return self._uses.claim(self._use_key(value))
+        return await self._uses.claim(self._use_key(value), stored="." not in value)
 
-    def release(self, value: str) -> None:
-        self._uses.release(self._use_key(value))
+    async def release(self, value: str) -> None:
+        await self._uses.release(self._use_key(value), stored="." not in value)
 
-    def consume(self, value: str, until: float) -> None:
-        self._uses.consume(self._use_key(value), until)
+    async def consume(self, value: str, until: float) -> None:
+        await self._uses.consume(self._use_key(value), until, stored="." not in value)
 
-    def verify(self, value: str, *, op: str, now: float | None = None) -> Link:
-        if op == "u" and self._uses.spent(self._use_key(value)):
+    async def verify(self, value: str, *, op: str, now: float | None = None) -> Link:
+        if op == "u" and await self._uses.spent(self._use_key(value)):
             raise LinkRefused()
         if "." not in value:
-            # A short id: the signed value is the one this process stored, checked below as before.
-            stored = self._store.get(value, now) if self._store is not None else None
+            # A short id: the signed value is the one a replica stored, checked below as before.
+            stored = await self._store.get(value) if self._store is not None else None
             if stored is None:
                 raise LinkRefused()
             value = stored
@@ -157,8 +178,16 @@ class LinkSigner:
             if token is None:
                 raise LinkRefused()
             m = body.get("m") or {}
-            return Link(op=op, kind=body["k"], target=body["t"], person=body["p"], expires=body["e"],
-                        token=token, max_bytes=m.get("max"), content_type=m.get("ct"))
+            return Link(
+                op=op,
+                kind=body["k"],
+                target=body["t"],
+                person=body["p"],
+                expires=body["e"],
+                token=token,
+                max_bytes=m.get("max"),
+                content_type=m.get("ct"),
+            )
         except LinkRefused:
             raise
         except (KeyError, TypeError, ValueError, AttributeError):

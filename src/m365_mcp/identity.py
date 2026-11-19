@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import time
@@ -10,6 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 from m365_mcp.core.errors import M365Error
+from m365_mcp.observability import AUTH_REFUSALS
 
 GRAPH_AUDIENCES = frozenset({"https://graph.microsoft.com", "00000003-0000-0000-c000-000000000000"})
 
@@ -54,8 +56,7 @@ def _client(claims: dict) -> str:
     return value.strip().lower() if isinstance(value, str) else ""
 
 
-def person_from_token(token: str | None, *, now: float | None = None,
-                      clients: frozenset[str] = frozenset()) -> Person:
+def person_from_token(token: str | None, *, now: float | None = None, clients: frozenset[str] = frozenset()) -> Person:
     """Shape, audience, expiry and, when the installation names its clients, the client the token was
     issued to. The signature is Graph's to check; a forged token gets a 401 there. A Graph token
     minted for some other application is still a valid Graph token, so only the client check keeps
@@ -78,4 +79,16 @@ def person_from_token(token: str | None, *, now: float | None = None,
 
 
 def current_person(clients: frozenset[str] = frozenset()) -> Person:
-    return person_from_token(current_token.get(), clients=clients)
+    token = current_token.get()
+    try:
+        return person_from_token(token, clients=clients)
+    except M365Error:
+        # The one refusal a person reads is "reconnect"; the metric tells a token issued to another
+        # application (invalid_client) from one missing, malformed, expired or not for Graph (invalid_token).
+        reason = "invalid_token"
+        if token and clients:
+            with contextlib.suppress(M365Error):
+                person_from_token(token)
+                reason = "invalid_client"
+        AUTH_REFUSALS.labels(reason).inc()
+        raise
