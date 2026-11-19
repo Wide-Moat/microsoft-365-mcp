@@ -86,7 +86,7 @@ class LinkSigner:
     def _mac(self, key: bytes, payload: bytes) -> str:
         return _b64(hmac.new(key, payload, hashlib.sha256).digest()[:16])
 
-    def issue(
+    async def issue(
         self,
         *,
         op: str,
@@ -117,37 +117,37 @@ class LinkSigner:
         value = f"{_b64(payload)}.{self._mac(self._sign[0], payload)}"
         if self._store is None:
             return value
-        return self._store.put(value, expires=exp, owner=person, tag=draft_tag(person, kind, target))
+        return await self._store.put(value, expires=exp, owner=person, tag=draft_tag(person, kind, target))
 
-    def revoke_draft(self, person: str, draft_id: str) -> int:
+    async def revoke_draft(self, person: str, draft_id: str) -> int:
         """A draft that is being sent takes no more uploads: its body and attachment links are spent."""
-        return self._uses.revoke(draft_tag(person, "draft_body", {"d": draft_id}))
+        return await self._uses.revoke(draft_tag(person, "draft_body", {"d": draft_id}))
 
-    def draft_busy(self, person: str, draft_id: str) -> bool:
+    async def draft_busy(self, person: str, draft_id: str) -> bool:
         """An upload into this draft (its body or a file) is running now."""
-        return self._uses.busy_under(draft_tag(person, "draft_body", {"d": draft_id}))
+        return await self._uses.busy_under(draft_tag(person, "draft_body", {"d": draft_id}))
 
     @staticmethod
     def _use_key(value: str) -> str:
         # A short id is its own key; a full signed value is long, so its digest stands for it.
         return value if "." not in value else hashlib.sha256(value.encode()).hexdigest()
 
-    def claim(self, value: str) -> bool:
+    async def claim(self, value: str) -> bool:
         """Start an upload on this link; False while another one runs on it or after one delivered."""
-        return self._uses.claim(self._use_key(value))
+        return await self._uses.claim(self._use_key(value), stored="." not in value)
 
-    def release(self, value: str) -> None:
-        self._uses.release(self._use_key(value))
+    async def release(self, value: str) -> None:
+        await self._uses.release(self._use_key(value), stored="." not in value)
 
-    def consume(self, value: str, until: float) -> None:
-        self._uses.consume(self._use_key(value), until)
+    async def consume(self, value: str, until: float) -> None:
+        await self._uses.consume(self._use_key(value), until, stored="." not in value)
 
-    def verify(self, value: str, *, op: str, now: float | None = None) -> Link:
-        if op == "u" and self._uses.spent(self._use_key(value)):
+    async def verify(self, value: str, *, op: str, now: float | None = None) -> Link:
+        if op == "u" and await self._uses.spent(self._use_key(value)):
             raise LinkRefused()
         if "." not in value:
-            # A short id: the signed value is the one this process stored, checked below as before.
-            stored = self._store.get(value, now) if self._store is not None else None
+            # A short id: the signed value is the one a replica stored, checked below as before.
+            stored = await self._store.get(value) if self._store is not None else None
             if stored is None:
                 raise LinkRefused()
             value = stored

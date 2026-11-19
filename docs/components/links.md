@@ -15,11 +15,14 @@ Nothing else is served on the public hostname.
 ## Token
 
 The link carries a short id: `secrets.token_urlsafe(16)`, 128 random bits, 22 characters
-(`links/store.py`). The id stands for the signed value below, kept in the process's memory
-until the link's own expiry, at most 5,000 open links and 300 per person; when full a new link is
-refused with a sentence, never by dropping one in use. A restart or a second replica does not know
-the id, so the server runs one replica and a restart answers 403 to the open links: the agent asks
-for a new one. A full signed value is still accepted and checked the same way.
+(`links/store.py`). The id stands for the signed value below, kept in the store every replica shares
+([state](state.md)) until the link's own expiry, at most 5,000 open links and 300 per person; when
+full a new link is refused with a sentence, never by dropping one in use. A link issued by one
+replica is used through any other, and a restart loses nothing. The store holds the value as
+AES-GCM ciphertext under a key derived from the sealing key and the id, under a keyed hash of the id:
+whoever reads the store cannot use a link. A full signed value is still accepted and checked the same
+way. While the store does not answer, a link route answers 503 with `Retry-After: 5` (the link may be
+good) and no new link is made.
 
 ```
 <base64url(payload)>.<base64url(HMAC-SHA256(key_sign, payload))[:22]>

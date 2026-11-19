@@ -199,6 +199,7 @@ Sends one draft this server created. Re-reads it and re-checks recipients first.
 | A recipient outside `M365_ALLOWED_RECIPIENT_DOMAINS`, when it is set | the domains outside it, never the addresses | `test_recipient_domains.py::test_send_draft_refuses_a_recipient_outside_the_allowed_domains` |
 | An upload link `save_draft` handed out for this draft, used once the draft was sent (a body or file the person never saw). Between the sent mark and the send the route refuses on the mark; the links are spent only after a send that went through, so a failed send leaves them usable | the link is spent: 403, ask for a new one | `test_link_routes_mail.py::test_sending_a_draft_revokes_its_upload_links` |
 | An upload into this draft (body or file) still running: it passed its check of the draft before the send and would add what the person never saw. Checked before the sent mark, and again after it, when the mark is taken back | an upload to this draft is still running; wait, then call `send_draft` again; nothing was sent | `test_link_routes_mail.py::test_send_draft_refuses_while_an_upload_to_the_draft_is_running`, `test_link_routes_mail.py::test_an_upload_starting_while_the_draft_is_marked_sent_stops_the_send` |
+| The store the replicas share does not answer: the allowance cannot be drawn, or whether an upload into this draft runs cannot be read. Fails closed, never an allowance of the replica's own | the server cannot reach the store its replicas share; try again in a few seconds; nothing was sent, the draft is kept | `test_mail.py::test_a_send_while_the_shared_store_is_down_sends_nothing`, `test_link_routes_mail.py::test_send_draft_refuses_while_it_cannot_tell_whether_an_upload_runs` |
 
 ### `save_automatic_reply(status, internal_message?, external_message?, audience?, start?, end?, user_confirmed)`
 `status`: `off`, `on`, `scheduled`. `audience` for people outside the organisation: `none`,
@@ -413,6 +414,7 @@ one transfer only; rule 32 asks short life and fail-closed checks, which they ha
 |---|---|---|
 | A name holding a character OneDrive refuses (backslash, slash, colon, star, question mark, quote, angle brackets, pipe) or `#`, or only dots, in `upload_file` and in `update_file` (`rename`, `create_folder`) | the characters | `test_files.py::test_a_name_with_a_hash_is_refused_everywhere` |
 | A name OneDrive reserves: `CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9` with any extension, a trailing dot, `_vti_` (measured: 400 or 403 at the `PUT`, after the link was handed out) | the rule; nothing is created | `test_files.py::test_a_name_onedrive_reserves_is_refused_before_a_link_is_made` |
+| The store the replicas share does not answer, so the link could not be kept for the replica that will serve it | try again in a few seconds; no link was made | `test_files.py::test_no_link_is_made_while_the_shared_store_is_down` |
 
 ### `update_file(ids[≤20], action, target_folder?, new_name?, version?, user_confirmed?)`
 `action`: `move`, `copy`, `rename`, `create_folder`, `delete` (to the recycle bin),

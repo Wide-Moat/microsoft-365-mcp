@@ -876,7 +876,7 @@ async def test_a_private_event_needs_no_confirmation_and_uses_the_mailbox_zone(g
     assert w.json["isReminderOn"] is True and w.json["reminderMinutesBeforeStart"] == 10 and w.json["showAs"] == "busy"
     assert w.json["transactionId"] and "attendees" not in w.json
     assert r.data["saved"] == "created" and r.data["id"] == "new1" and "sends_left_now" not in r.data
-    assert guard._buckets == {}  # nothing was drawn from the bucket
+    assert guard.store.bucket_count() == 0  # nothing was drawn from the bucket
 
 
 async def test_inviting_without_confirmation_writes_nothing(graph, invoke):

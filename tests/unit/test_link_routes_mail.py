@@ -3,6 +3,7 @@ import time
 
 import httpx
 import pytest
+from helpers import run
 from starlette.testclient import TestClient
 
 from m365_mcp.links.routes import ATTACH_CHUNK, links_app
@@ -32,17 +33,19 @@ def an_unsent_draft(graph):
 
 
 def link(rt, op, kind, target, **kw):
-    from helpers import make_token
+    from helpers import make_token, run
 
-    return rt.signer.issue(
-        op=op,
-        kind=kind,
-        target=target,
-        person="p1",
-        token=make_token(),
-        token_expires=int(time.time()) + 3600,
-        ttl=300 if op == "d" else 180,
-        **kw,
+    return run(
+        rt.signer.issue(
+            op=op,
+            kind=kind,
+            target=target,
+            person="p1",
+            token=make_token(),
+            token_expires=int(time.time()) + 3600,
+            ttl=300 if op == "d" else 180,
+            **kw,
+        )
     )
 
 
@@ -67,15 +70,17 @@ def test_download_link_cannot_upload(rt, client):
 def test_expired_link_is_403(rt, client, graph):
     from helpers import make_token
 
-    v = rt.signer.issue(
-        op="d",
-        kind="attachment",
-        target={"m": "m", "a": "a"},
-        person="p",
-        token=make_token(),
-        token_expires=int(time.time()) + 3600,
-        ttl=300,
-        now=time.time() - 1000,
+    v = run(
+        _unstored(rt).issue(
+            op="d",
+            kind="attachment",
+            target={"m": "m", "a": "a"},
+            person="p",
+            token=make_token(),
+            token_expires=int(time.time()) + 3600,
+            ttl=300,
+            now=time.time() - 1000,
+        )
     )
     assert client.get(f"/d/{v}").status_code == 403
     assert graph.seen == []
@@ -169,7 +174,7 @@ async def test_draft_attachment_links_carry_the_150_mb_limit(graph, invoke, rt):
     r = await invoke("save_draft", subject="S", attachments_upload=1)
     assert not r.error, r.text
     value = r.data["attachment_uploads"][0].rsplit("/u/", 1)[1].rstrip("'")
-    assert rt.signer.verify(value, op="u").max_bytes == 150 * 1024 * 1024
+    assert (await rt.signer.verify(value, op="u")).max_bytes == 150 * 1024 * 1024
 
 
 def test_an_attachment_past_the_message_size_limit_is_refused(rt, client, graph):
@@ -384,8 +389,8 @@ async def test_sending_a_draft_revokes_its_upload_links(graph, invoke, rt):
 
     for v in values:
         with pytest.raises(LinkRefused):
-            rt.signer.verify(v, op="u")
-    assert rt.signer.verify(other, op="u").target == {"d": "d2"}, "another draft's link is untouched"
+            (await rt.signer.verify(v, op="u"))
+    assert (await rt.signer.verify(other, op="u")).target == {"d": "d2"}, "another draft's link is untouched"
 
 
 def _draft_with_links(graph):
@@ -417,12 +422,12 @@ async def test_send_draft_refuses_while_an_upload_to_the_draft_is_running(graph,
     graph.on("PATCH", "/me/messages/d1", {})
     graph.on("POST", "/me/messages/d1/send", None, status=202)
     values = await _links(invoke)
-    assert rt.signer.claim(values[1])  # a long attachment upload, past its link check
+    assert await rt.signer.claim(values[1])  # a long attachment upload, past its link check
     graph.seen.clear()
     r = await invoke("send_draft", id="d1", user_confirmed=True)
     assert r.error and "upload to this draft is still running" in r.text and "send_draft again" in r.text
     assert graph.writes() == []
-    rt.signer.consume(values[1], time.time() + 180)  # it finished: now the draft sends
+    (await rt.signer.consume(values[1], time.time() + 180))  # it finished: now the draft sends
     assert not (await invoke("send_draft", id="d1", user_confirmed=True)).error
 
 
@@ -433,7 +438,7 @@ async def test_an_upload_starting_while_the_draft_is_marked_sent_stops_the_send(
     def mark(seen):
         # The upload claims its link while send_draft's mark is on its way, and read the draft before it.
         if "sent" in str(seen.json):
-            rt.signer.claim(values[1])
+            run(rt.signer.claim(values[1]))
         return httpx.Response(200, json={})
 
     graph.on("PATCH", "/me/messages/d1", mark)
@@ -453,4 +458,28 @@ async def test_a_send_that_fails_leaves_the_upload_links_usable(graph, invoke, r
     r = await invoke("send_draft", id="d1", user_confirmed=True)
     assert r.error
     for v in values:
-        assert rt.signer.verify(v, op="u").target == {"d": "d1"}
+        assert (await rt.signer.verify(v, op="u")).target == {"d": "d1"}
+
+
+def _unstored(rt):
+    """The same keys without the store: a link issued in the past (its expiry already gone) is the signed
+    value itself, since the store refuses to keep what has already expired."""
+    from m365_mcp.links.tokens import LinkSigner
+
+    return LinkSigner(rt.signer._sign, rt.signer._enc)
+
+
+async def test_send_draft_refuses_while_it_cannot_tell_whether_an_upload_runs(graph, invoke, rt):
+    from helpers import DownStore
+
+    _draft_with_links(graph)
+    graph.on("PATCH", "/me/messages/d1", {})
+    graph.on("POST", "/me/messages/d1/send", None, status=202)
+    await _links(invoke)
+    from m365_mcp.links.store import LinkStore
+
+    rt.signer._store = rt.signer._uses = LinkStore(DownStore())
+    graph.seen.clear()
+    r = await invoke("send_draft", id="d1", user_confirmed=True)
+    assert r.error and "cannot reach the store its replicas share" in r.text and "Nothing was sent" in r.text
+    assert graph.writes() == []

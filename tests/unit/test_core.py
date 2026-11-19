@@ -2,7 +2,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 import pytest
-from helpers import make_token
+from helpers import make_token, run
 
 from m365_mcp.core.context import scope_granted
 from m365_mcp.core.errors import M365Error
@@ -19,20 +19,20 @@ LISBON = ZoneInfo("Europe/Lisbon")
 
 def test_guard_requires_confirmation():
     with pytest.raises(M365Error) as e:
-        Guard().check("p", kind="mail", user_confirmed=False)
+        run(Guard().check("p", kind="mail", user_confirmed=False))
     assert e.value.key == "confirm"
 
 
 def test_guard_allows_own_response_without_confirmation():
-    assert Guard().check("p", kind="respond", user_confirmed=None, needs_confirmation=False)["kind"] == "respond"
+    assert run(Guard().check("p", kind="respond", user_confirmed=None, needs_confirmation=False))["kind"] == "respond"
 
 
 def test_guard_caps_recipients_and_refuses_lists():
     with pytest.raises(M365Error) as e:
-        Guard().check("p", kind="mail", user_confirmed=True, recipients=21)
+        run(Guard().check("p", kind="mail", user_confirmed=True, recipients=21))
     assert e.value.key == "too_many_recipients"
     with pytest.raises(M365Error) as e:
-        Guard().check("p", kind="mail", user_confirmed=True, recipients=1, group_addresses=["all@x.test"])
+        run(Guard().check("p", kind="mail", user_confirmed=True, recipients=1, group_addresses=["all@x.test"]))
     assert e.value.key == "distribution_list"
 
 
@@ -40,13 +40,13 @@ def test_bucket_bursts_ten_then_refills_one_per_six_seconds():
     now = {"t": 0.0}
     g = Guard(clock=lambda: now["t"])
     for _ in range(10):
-        g.check("p", kind="mail", user_confirmed=True)
+        run(g.check("p", kind="mail", user_confirmed=True))
     with pytest.raises(M365Error) as e:
-        g.check("p", kind="mail", user_confirmed=True)
+        run(g.check("p", kind="mail", user_confirmed=True))
     assert e.value.key == "rate" and e.value.params["seconds"] == 6
     now["t"] = 6.0
-    g.check("p", kind="mail", user_confirmed=True)
-    g.check("other-person", kind="mail", user_confirmed=True)  # buckets are per person
+    run(g.check("p", kind="mail", user_confirmed=True))
+    run(g.check("other-person", kind="mail", user_confirmed=True))  # buckets are per person
 
 
 # -- time -------------------------------------------------------------------------------------

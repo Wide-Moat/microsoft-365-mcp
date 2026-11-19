@@ -128,3 +128,44 @@ def inner(fenced: str) -> str:
     m = _LINE.match(fenced) or _BLOCK.match(fenced)
     assert m, f"not fenced: {fenced!r}"
     return m.group(3)
+
+
+def run(coro):
+    """Await from a synchronous test (one served through Starlette's TestClient, which runs the app in a
+    thread of its own): the memory store has no event loop of its own to be bound to."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # Called from inside a running loop (a fixture of an async test): a loop of its own, in a thread.
+    with ThreadPoolExecutor(1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+class DownStore:
+    """A shared store that does not answer: every operation fails the way RedisStore reports a dead server."""
+
+    kind = "redis"
+
+    def __getattr__(self, name: str):
+        if name.startswith(("link_", "take", "ping")):
+
+            async def down(*_a, **_k):
+                from m365_mcp.state.store import StoreUnavailable
+
+                raise StoreUnavailable(name)
+
+            return down
+        raise AttributeError(name)
+
+    def bucket_count(self) -> int:
+        return 0
+
+    def view(self, _namer):
+        return self
+
+    async def aclose(self) -> None:
+        return None

@@ -1,0 +1,231 @@
+{{- include "m365.validate" . }}
+{{- $run := "/run/microsoft-365-mcp" }}
+{{- $sentinel := not (empty .Values.state.sentinel.hosts) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "m365.fullname" . }}
+  labels: {{- include "m365.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  {{- if include "m365.sharedState" . }}
+  # One new pod before an old one goes: no moment without a serving pod. The key comes from a Secret the
+  # deployer owns and does not change on a deploy, so old and new pods open each other's links; a rotation
+  # goes in phases (scripts/new-sealing-key.sh) so that every serving pod holds every key in use.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  {{- else }}
+  # No shared store: each pod keeps links and allowances in its own memory, so two pods must never serve
+  # together. A deploy stops the old pod before the new one starts: a few seconds without the server.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels: {{- include "m365.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "m365.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{ toYaml . | nindent 8 }}{{ end }}
+      annotations:
+        # a rotated key restarts the pods, which stage it again
+        microsoft-365-mcp/key-revision: {{ .Values.key.revision | quote }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      # the server never calls the Kubernetes API: no API token in the pod
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # The only container that mounts a Secret. It copies the key (and the store's passwords) to a memory
+        # volume as files the server's user alone may read. The same image, so staging needs no registry
+        # the server does not already need.
+        - name: stage-keys
+          image: {{ include "m365.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "m365_mcp.keys.stage", "/secret", {{ $run | quote }}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: secret
+              mountPath: /secret
+              readOnly: true
+            - name: keys
+              mountPath: {{ $run }}
+      containers:
+        - name: server
+          image: {{ include "m365.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: links
+              containerPort: 8001
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+          env:
+            - name: M365_KEY_FILE
+              value: {{ $run }}/key
+            - name: M365_METRICS_PORT
+              value: {{ .Values.metrics.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            {{- with .Values.linksBaseUrl }}
+            - name: M365_LINKS_BASE_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.areas }}
+            - name: M365_AREAS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- if kindIs "slice" .Values.switches }}
+            - name: M365_SWITCHES
+              value: {{ join "," .Values.switches | quote }}
+            {{- end }}
+            {{- with .Values.allowedRecipientDomains }}
+            - name: M365_ALLOWED_RECIPIENT_DOMAINS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.expectedClientIds }}
+            - name: M365_EXPECTED_CLIENT_IDS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- if .Values.caBundle.configMap }}
+            - name: M365_CA_BUNDLE
+              value: /etc/microsoft-365-mcp/ca/{{ .Values.caBundle.key }}
+            {{- end }}
+            {{- if .Values.state.url }}
+            - name: M365_STATE_URL
+              value: {{ .Values.state.url | quote }}
+            {{- else if $sentinel }}
+            - name: M365_STATE_SENTINELS
+              value: {{ join "," .Values.state.sentinel.hosts | quote }}
+            - name: M365_STATE_SENTINEL_MASTER
+              value: {{ .Values.state.sentinel.master | quote }}
+            - name: M365_STATE_DB
+              value: {{ .Values.state.db | quote }}
+            - name: M365_STATE_TLS
+              value: {{ .Values.state.tls | quote }}
+            {{- end }}
+            {{- with .Values.state.username }}
+            - name: M365_STATE_USERNAME
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.state.existingSecret }}
+            - name: M365_STATE_PASSWORD_FILE
+              value: {{ $run }}/password
+            {{- if $sentinel }}
+            - name: M365_STATE_SENTINEL_PASSWORD_FILE
+              value: {{ $run }}/sentinelPassword
+            {{- end }}
+            {{- end }}
+          # On the metrics port: the kubelet never needs the MCP or the links port. Ready means configured
+          # (key and settings loaded); the shared store is reported by /readyz and mcp_state_store_up, never
+          # required, so a store outage leaves reads serving and sends failing closed.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 30
+            failureThreshold: 3
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: keys
+              mountPath: {{ $run }}
+              readOnly: true
+            {{- if .Values.caBundle.configMap }}
+            - name: ca
+              mountPath: /etc/microsoft-365-mcp/ca
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            {{- with .Values.tmp.medium }}
+            medium: {{ . }}
+            {{- end }}
+            sizeLimit: {{ .Values.tmp.sizeLimit }}
+        - name: keys
+          emptyDir:
+            medium: Memory  # tmpfs, gone with the pod; on the node's disk only if the node swaps
+            sizeLimit: 1Mi
+        - name: secret
+          projected:
+            defaultMode: 0440  # root:fsGroup; the init container reads it through the pod's group
+            sources:
+              - secret:
+                  name: {{ .Values.key.existingSecret }}
+                  items:
+                    - key: {{ .Values.key.secretKey }}
+                      path: key
+              {{- if .Values.state.existingSecret }}
+              - secret:
+                  name: {{ .Values.state.existingSecret }}
+                  items:
+                    - key: password
+                      path: password
+                    {{- if $sentinel }}
+                    - key: sentinelPassword
+                      path: sentinelPassword
+                    {{- end }}
+              {{- end }}
+        {{- if .Values.caBundle.configMap }}
+        - name: ca
+          configMap:
+            name: {{ .Values.caBundle.configMap }}
+        {{- end }}
+      {{- if .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml .Values.topologySpreadConstraints | nindent 8 }}
+      {{- else }}
+      # Replicas on different nodes where the cluster has them; never a reason to leave a pod pending.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "m365.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -8,10 +8,13 @@ person's data.
 from __future__ import annotations
 
 import asyncio
+import functools
 import html
 import logging
+import os
 import random
 import re
+import ssl
 import time
 import uuid
 from collections import defaultdict
@@ -26,6 +29,7 @@ import httpx
 
 from m365_mcp import __version__
 from m365_mcp.graph.errors import GraphError, scope_from_message  # noqa: I001
+from m365_mcp.observability import UPSTREAM_REQUESTS, UPSTREAM_SECONDS, status_class
 
 # httpx logs every request URL at INFO, and Graph URLs carry search strings, addresses and
 # subjects in their query. Nothing below WARNING from the HTTP stack reaches the logs.
@@ -109,10 +113,12 @@ MAX_WAIT = 30.0
 
 
 def _retry_after(resp: httpx.Response) -> int | None:
-    raw = resp.headers.get("Retry-After")
-    if raw and raw.isdigit():
-        return int(raw)
-    return None
+    raw = (resp.headers.get("Retry-After") or "").strip()
+    try:
+        wait = int(raw)
+    except ValueError:
+        return None  # an HTTP date, or nothing: the caller's own wait applies
+    return wait if wait >= 0 else None
 
 
 class Pacer:
@@ -183,8 +189,52 @@ class Page:
     next_link: str | None
 
 
+@functools.cache
+def tls_context(ca_bundle: str) -> ssl.SSLContext | bool:
+    """The system's CAs, plus an installation's own (`M365_CA_BUNDLE`) when a TLS-inspecting proxy at the
+    perimeter re-signs Microsoft's certificates. Verification is never turned off."""
+    if not ca_bundle:
+        return True
+    ctx = ssl.create_default_context()
+    ctx.load_verify_locations(cafile=ca_bundle)
+    return ctx
+
+
+async def _started(request: httpx.Request) -> None:
+    request.extensions["m365_t0"] = time.perf_counter()
+
+
+async def _answered(response: httpx.Response) -> None:
+    """Every answer from Graph or a Microsoft file host, counted by status class and timed to its headers.
+    Hooks rather than a transport: a proxy from the environment replaces the transport, not the hooks."""
+    response.request.extensions["m365_answered"] = True
+    t0 = response.request.extensions.get("m365_t0")
+    if isinstance(t0, float):
+        UPSTREAM_SECONDS.one().observe(time.perf_counter() - t0)
+    UPSTREAM_REQUESTS.labels(status_class(response.status_code)).inc()
+
+
+class _MeteredClient(httpx.AsyncClient):
+    """`send` is the one path of every request, streamed or not: a request that got no answer at all is
+    counted here as `error`, once; one that was answered was counted by its status, and a failure while
+    reading its body is not a second request."""
+
+    async def send(self, request: httpx.Request, **kwargs: Any) -> httpx.Response:
+        try:
+            return await super().send(request, **kwargs)
+        except httpx.HTTPError:
+            if not request.extensions.get("m365_answered"):
+                UPSTREAM_REQUESTS.labels("error").inc()
+            raise
+
+
 class Graph:
-    """One instance per tool call, carrying the person's token."""
+    """One instance per tool call, carrying the person's token.
+
+    Concurrency and pacing per person (`Pacer`) hold within one process. With several replicas a person's
+    calls may land on different pods, each pacing alone; the limits are low enough that the replica count
+    an installation runs stays under Graph's throttling, and Graph's own 429 with Retry-After is honoured
+    either way."""
 
     def __init__(
         self,
@@ -201,8 +251,10 @@ class Graph:
         self.timezone = timezone
         self._sleep = sleep
         self._pacer = pacer
-        self._client = httpx.AsyncClient(
+        self._client = _MeteredClient(
             transport=transport,
+            verify=tls_context(os.environ.get("M365_CA_BUNDLE", "").strip()),
+            event_hooks={"request": [_started], "response": [_answered]},
             timeout=httpx.Timeout(30.0, connect=10.0),
             follow_redirects=False,
         )

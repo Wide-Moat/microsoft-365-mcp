@@ -1,0 +1,122 @@
+# A store for the chart e2e only, never for an installation: Valkey master + replica behind three Sentinels,
+# from the official image, passwords from the Secret `valkey-auth` (keys password, sentinelPassword) that
+# scripts/chart-e2e.sh creates. The master and the replica are bare Pods, so deleting the master kills it for
+# good and the Sentinels must fail over; each has a Service whose name it announces.
+apiVersion: v1
+kind: Service
+metadata: {name: valkey-a}
+spec:
+  selector: {e2e-valkey: a}
+  ports: [{name: valkey, port: 6379}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: valkey-b}
+spec:
+  selector: {e2e-valkey: b}
+  ports: [{name: valkey, port: 6379}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: valkey-a
+  labels: {e2e-valkey: a}
+spec:
+  containers:
+    - name: valkey
+      image: valkey/valkey:8.1.12-alpine@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc
+      env:
+        - {name: NS, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+        - {name: ME, value: valkey-a}
+        - {name: PW, valueFrom: {secretKeyRef: {name: valkey-auth, key: password}}}
+      command:
+        - sh
+        - -c
+        - >-
+          exec valkey-server --requirepass "$PW" --masterauth "$PW" --save "" --appendonly no
+          --maxmemory-policy noeviction --replica-announce-ip "$ME.$NS.svc.cluster.local"
+      readinessProbe:
+        exec: {command: [sh, -c, 'valkey-cli -a "$PW" --no-auth-warning ping | grep -q PONG']}
+        periodSeconds: 2
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: valkey-b
+  labels: {e2e-valkey: b}
+spec:
+  containers:
+    - name: valkey
+      image: valkey/valkey:8.1.12-alpine@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc
+      env:
+        - {name: NS, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+        - {name: ME, value: valkey-b}
+        - {name: PW, valueFrom: {secretKeyRef: {name: valkey-auth, key: password}}}
+      command:
+        - sh
+        - -c
+        - >-
+          exec valkey-server --requirepass "$PW" --masterauth "$PW" --save "" --appendonly no
+          --maxmemory-policy noeviction --replica-announce-ip "$ME.$NS.svc.cluster.local"
+          --replicaof "valkey-a.$NS.svc.cluster.local" 6379
+      readinessProbe:
+        exec: {command: [sh, -c, 'valkey-cli -a "$PW" --no-auth-warning ping | grep -q PONG']}
+        periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata: {name: valkey-sentinel-headless}
+spec:
+  clusterIP: None
+  selector: {e2e-valkey: sentinel}
+  ports: [{name: sentinel, port: 26379}]
+---
+# One Service in front of the Sentinels, the way a cluster's operator often exposes them.
+apiVersion: v1
+kind: Service
+metadata: {name: valkey-sentinel}
+spec:
+  selector: {e2e-valkey: sentinel}
+  ports: [{name: sentinel, port: 26379}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: valkey-sentinel}
+spec:
+  serviceName: valkey-sentinel-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector: {matchLabels: {e2e-valkey: sentinel}}
+  template:
+    metadata: {labels: {e2e-valkey: sentinel}}
+    spec:
+      containers:
+        - name: sentinel
+          image: valkey/valkey:8.1.12-alpine@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc
+          env:
+            - {name: NS, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            - {name: POD, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: PW, valueFrom: {secretKeyRef: {name: valkey-auth, key: password}}}
+            - {name: SPW, valueFrom: {secretKeyRef: {name: valkey-auth, key: sentinelPassword}}}
+          command:
+            - sh
+            - -c
+            - |
+              until getent hosts "valkey-a.$NS.svc.cluster.local" >/dev/null; do sleep 1; done
+              cat > /tmp/sentinel.conf <<CONF
+              port 26379
+              sentinel resolve-hostnames yes
+              sentinel announce-hostnames yes
+              sentinel announce-ip $POD.valkey-sentinel-headless.$NS.svc.cluster.local
+              requirepass $SPW
+              sentinel sentinel-pass $SPW
+              sentinel monitor mymaster valkey-a.$NS.svc.cluster.local 6379 2
+              sentinel auth-pass mymaster $PW
+              sentinel down-after-milliseconds mymaster 5000
+              sentinel failover-timeout mymaster 15000
+              sentinel parallel-syncs mymaster 1
+              CONF
+              exec valkey-sentinel /tmp/sentinel.conf
+          readinessProbe:
+            exec: {command: [sh, -c, 'valkey-cli -p 26379 -a "$SPW" --no-auth-warning ping | grep -q PONG']}
+            periodSeconds: 2

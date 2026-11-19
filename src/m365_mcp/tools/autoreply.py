@@ -108,7 +108,7 @@ async def save_automatic_reply(
                 raise invalid(
                     "There is no reply text yet. Give internal_message, and external_message if people outside should get one."
                 )
-            receipt = c.guard(kind="automatic_reply", user_confirmed=user_confirmed)
+            receipt = await c.guard(kind="automatic_reply", user_confirmed=user_confirmed)
         await c.graph.patch("/me/mailboxSettings", {"automaticRepliesSetting": setting})
         out: dict[str, Any] = {"automatic_reply": status}
         if status != "off":

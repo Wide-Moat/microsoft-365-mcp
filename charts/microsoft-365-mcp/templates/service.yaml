@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "m365.fullname" . }}
+  labels: {{- include "m365.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "m365.selectorLabels" . | nindent 4 }}
+  ports:
+    # MCP, for the gateway
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+    # signed file links, for the agent's sandbox (and the Ingress, when published)
+    - name: links
+      port: {{ .Values.service.linksPort }}
+      targetPort: links
+    # Prometheus, and the probes
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics

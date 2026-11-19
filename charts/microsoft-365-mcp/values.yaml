@@ -1,0 +1,93 @@
+# microsoft-365-mcp. Every key is documented in charts/microsoft-365-mcp/README.md.
+
+image:
+  repository: ghcr.io/wide-moat/microsoft-365-mcp
+  tag: ""  # defaults to the chart's appVersion
+  digest: ""  # sha256:… pins the image; wins over tag
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# The address the agent's sandbox reaches the links port at: https, or a cluster-internal
+# http://<service>.<namespace>.svc[.cluster.local][:port]. Required while an area that moves files is on.
+linksBaseUrl: ""
+areas: []  # empty: the defaults (every area but bookings); or a subset
+switches: null  # null: the defaults; a list (even empty) replaces them
+allowedRecipientDomains: []  # empty: no restriction
+expectedClientIds: []  # your Entra app's client id: a token issued to any other app is refused. Set it.
+logLevel: INFO
+# Extra CAs (PEM) trusted for Microsoft Graph and the state store, for a TLS-inspecting proxy at the
+# perimeter: a ConfigMap and its key.
+caBundle:
+  configMap: ""
+  key: ca.crt
+
+replicaCount: 2
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  inFlightPerPod: null  # set: also scale on mcp_http_requests_in_flight (needs a custom metrics API)
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+metrics:
+  port: 9090
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# The store replicas share (Redis or Valkey). Required for more than one replica.
+state:
+  url: ""  # redis://host:6379/0 or rediss://host:6380/0, no credentials in it
+  sentinel:
+    hosts: []  # [store-sentinel:26379, ...]; one Service in front of the sentinels is enough
+    master: mymaster
+  db: 0  # Sentinel mode; with url, the path decides
+  tls: false  # Sentinel mode; with url, the scheme decides
+  username: ""  # an ACL user, when the store has one
+  # A Secret with `password` and, in Sentinel mode, `sentinelPassword` (the same value when the sentinels
+  # share it). Staged by the init container like the key; empty for a store without a password.
+  existingSecret: ""
+
+key:
+  # The Secret holding the sealing key file (one `<id>:<base64url 32 bytes>` per line; the first seals,
+  # every line opens). It is mounted only into the init container, which copies it to a memory volume
+  # readable by the server's user alone; the server container never mounts the Secret.
+  existingSecret: ""
+  secretKey: key
+  # Set to the new key id when the key is rotated, so every pod restarts and reads the new file.
+  revision: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  linksPort: 8001
+
+# Publishes the links port only, on the host of linksBaseUrl, paths /d/ and /u/. The MCP port stays
+# inside the cluster, for the gateway.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  tlsSecretName: ""
+
+# /tmp holds the spool of every running upload (up to 1 GiB in all, links/routes.py SPOOL_TOTAL).
+tmp:
+  medium: ""  # "" is the node's disk; Memory would count every spooled byte against the pod's memory
+  sizeLimit: 2Gi
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 192Mi
+  limits:
+    memory: 512Mi
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []  # empty: spread across nodes, softly

@@ -1044,7 +1044,7 @@ async def save_event(
         invited = len(notified)
         receipt: dict[str, Any] = {}
         if significant and invited:
-            receipt = c.guard(
+            receipt = await c.guard(
                 kind="event",
                 user_confirmed=user_confirmed,
                 recipients=invited,
@@ -1167,11 +1167,11 @@ async def respond_to_event(
             # A comment is free text the person (or an injected instruction) addresses to someone else:
             # it needs their word, and the organiser must be inside the allowed domains when set.
             org = _address(e.get("organizer"))
-            c.guard(
+            await c.guard(
                 kind="event_response", user_confirmed=user_confirmed, recipients=1, addresses=[org] if org else [""]
             )
         elif send_response:
-            c.guard(kind="event_response", user_confirmed=None, recipients=1, needs_confirmation=False)
+            await c.guard(kind="event_response", user_confirmed=None, recipients=1, needs_confirmation=False)
         # Graph refuses any comment, even an empty one, when the response is not sent (measured).
         await c.graph.post(
             f"/me/events/{id}/{_RESPONSE_ACTION[response]}",
@@ -1243,7 +1243,7 @@ async def cancel_event(
             }
         # The cancellation itself must reach everyone already invited, or the meeting stays standing with
         # them in it; a comment is free text, so with one the attendees must be inside the allowed domains.
-        receipt = c.guard(
+        receipt = await c.guard(
             kind="event",
             user_confirmed=user_confirmed,
             recipients=invited,

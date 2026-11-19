@@ -190,7 +190,7 @@ async def save_booking(
             fields["staffMemberIds"] = [
                 one(q, members, kind="staff member", name=lambda m: m.get("displayName") or "")["id"] for q in staff
             ]
-        receipt = c.guard(kind="booking", user_confirmed=user_confirmed, recipients=1 + len(staff or []))
+        receipt = await c.guard(kind="booking", user_confirmed=user_confirmed, recipients=1 + len(staff or []))
         if id:
             await c.graph.patch(f"{path}/appointments/{id}", fields)
             return {"saved": True, "id": id, **receipt}
@@ -221,6 +221,6 @@ async def cancel_booking(
     async with call("cancel_booking") as c:
         c.need("BookingsAppointment.ReadWrite.All")
         b = await _business(c, business)
-        receipt = c.guard(kind="booking", user_confirmed=user_confirmed, recipients=1)
+        receipt = await c.guard(kind="booking", user_confirmed=user_confirmed, recipients=1)
         await c.graph.post(f"{BASE}/{b['id']}/appointments/{id}/cancel", {"cancellationMessage": message})
         return {"cancelled": True, "id": id, **receipt}

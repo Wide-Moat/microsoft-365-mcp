@@ -45,8 +45,13 @@ shared pacing limiters, keyed by person.
 - **Pacing before Graph has to throttle:** per person, at most 4 in-flight Outlook requests and 4
   in-flight SharePoint/OneDrive requests; Teams at most 1 request per second per person (a token
   bucket of 1, refill 1/s), member changes serialised per chat.
-- Pacing is in-process. Several replicas multiply it; the limits are set so that the default
-  replica count stays under Graph's.
+- Pacing and the concurrency limits are per process, on purpose: they shape this replica's traffic
+  to Graph, and keeping them in the shared store would add a round trip to every Graph request.
+  Several replicas multiply them; a person's calls rarely run on several replicas at once, and Graph's
+  own 429 with `Retry-After` is honoured either way.
+- `M365_CA_BUNDLE` adds an installation's CAs (PEM) to the system's, for a TLS-inspecting proxy at the
+  perimeter; verification is never turned off. Every answer is counted in `mcp_upstream_requests_total`
+  and timed in `mcp_upstream_duration_seconds`.
 
 ## Hosts
 

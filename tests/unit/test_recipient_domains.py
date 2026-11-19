@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import httpx
 import pytest
+from helpers import run
 
 from m365_mcp.core.context import configure
 from m365_mcp.core.errors import M365Error
@@ -49,63 +50,78 @@ def people(graph, *entries):
 
 def test_guard_refuses_an_address_outside_the_allowed_domains():
     with pytest.raises(M365Error) as e:
-        Guard().check(
-            "p",
-            kind="mail",
-            user_confirmed=True,
-            recipients=2,
-            addresses=["ann@x.test", "eve@Outside.test"],
-            allowed_domains=ALLOWED,
+        run(
+            Guard().check(
+                "p",
+                kind="mail",
+                user_confirmed=True,
+                recipients=2,
+                addresses=["ann@x.test", "eve@Outside.test"],
+                allowed_domains=ALLOWED,
+            )
         )
     assert e.value.key == "outside_domains"
     assert "outside.test" in e.value.text and "eve" not in e.value.text
 
 
 def test_guard_accepts_subdomains_and_any_case():
-    r = Guard().check(
-        "p",
-        kind="mail",
-        user_confirmed=True,
-        recipients=2,
-        addresses=["ann@X.TEST", "bo@eu.partner.test"],
-        allowed_domains=ALLOWED,
+    r = run(
+        Guard().check(
+            "p",
+            kind="mail",
+            user_confirmed=True,
+            recipients=2,
+            addresses=["ann@X.TEST", "bo@eu.partner.test"],
+            allowed_domains=ALLOWED,
+        )
     )
     assert r["recipients"] == 2
 
 
 def test_a_lookalike_domain_is_not_a_subdomain():
     with pytest.raises(M365Error) as e:
-        Guard().check(
-            "p",
-            kind="mail",
-            user_confirmed=True,
-            recipients=1,
-            addresses=["mallory@evilx.test"],
-            allowed_domains=ALLOWED,
+        run(
+            Guard().check(
+                "p",
+                kind="mail",
+                user_confirmed=True,
+                recipients=1,
+                addresses=["mallory@evilx.test"],
+                allowed_domains=ALLOWED,
+            )
         )
     assert "evilx.test" in e.value.text
 
 
 def test_an_address_without_a_domain_is_refused():
     with pytest.raises(M365Error) as e:
-        Guard().check(
-            "p", kind="mail", user_confirmed=True, recipients=1, addresses=["nobody"], allowed_domains=ALLOWED
+        run(
+            Guard().check(
+                "p", kind="mail", user_confirmed=True, recipients=1, addresses=["nobody"], allowed_domains=ALLOWED
+            )
         )
     assert e.value.key == "outside_domains"
 
 
 def test_without_allowed_domains_any_domain_passes():
-    r = Guard().check("p", kind="mail", user_confirmed=True, recipients=1, addresses=["eve@outside.test"])
+    r = run(Guard().check("p", kind="mail", user_confirmed=True, recipients=1, addresses=["eve@outside.test"]))
     assert r["recipients"] == 1
 
 
 def test_a_refused_domain_takes_nothing_from_the_bucket():
     g = Guard()
     with pytest.raises(M365Error):
-        g.check(
-            "p", kind="mail", user_confirmed=True, recipients=1, addresses=["eve@outside.test"], allowed_domains=ALLOWED
+        run(
+            g.check(
+                "p",
+                kind="mail",
+                user_confirmed=True,
+                recipients=1,
+                addresses=["eve@outside.test"],
+                allowed_domains=ALLOWED,
+            )
         )
-    assert g._buckets == {}
+    assert g.store.bucket_count() == 0
 
 
 # -- the tools ---------------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import time
 
 import httpx
 import pytest
+from helpers import run
 from starlette.testclient import TestClient
 
 from m365_mcp.links.routes import READ_CHUNK, REFUSED, links_app
@@ -21,16 +22,18 @@ def client(rt):
 
 
 def issue(rt, *, op, kind, target, max_bytes=None, content_type=None, person="p1"):
-    return rt.signer.issue(
-        op=op,
-        kind=kind,
-        target=target,
-        person=person,
-        token="BEARER-XYZ",
-        token_expires=FAR,
-        ttl=300 if op == "d" else 180,
-        max_bytes=max_bytes,
-        content_type=content_type,
+    return run(
+        rt.signer.issue(
+            op=op,
+            kind=kind,
+            target=target,
+            person=person,
+            token="BEARER-XYZ",
+            token_expires=FAR,
+            ttl=300 if op == "d" else 180,
+            max_bytes=max_bytes,
+            content_type=content_type,
+        )
     )
 
 
@@ -191,7 +194,7 @@ def test_a_tampered_link_is_403(rt, graph, client):
     tok = issue(rt, op="d", kind="drive", target={"i": "F1"})
     # The link is a short id; the signed value it stands for is still honoured on its own,
     # so tampering either one is refused.
-    payload, sig = rt.signer._store.get(tok).split(".")
+    payload, sig = run(rt.signer._store.get(tok)).split(".")
     flipped = payload[:-2] + ("AA" if payload[-2:] != "AA" else "BB")
     other_id = tok[:-2] + ("AA" if tok[-2:] != "AA" else "BB")
     for bad in (f"{flipped}.{sig}", f"{payload}.{sig[:-2]}xx", "garbage", payload, other_id):
@@ -208,15 +211,17 @@ def test_the_wrong_operation_is_403(rt, graph, client):
 
 
 def test_an_expired_link_is_403(rt, graph, client):
-    old = rt.signer.issue(
-        op="d",
-        kind="drive",
-        target={"i": "F1"},
-        person="p",
-        token="t",
-        token_expires=FAR,
-        ttl=300,
-        now=time.time() - 1000,
+    old = run(
+        _unstored(rt).issue(
+            op="d",
+            kind="drive",
+            target={"i": "F1"},
+            person="p",
+            token="t",
+            token_expires=FAR,
+            ttl=300,
+            now=time.time() - 1000,
+        )
     )
     assert client.get(f"/d/{old}").status_code == 403
 
@@ -287,11 +292,11 @@ def test_an_upload_the_link_refused_leaves_the_link_for_the_corrected_one(rt, gr
 def test_a_second_upload_on_a_link_already_receiving_one_is_refused(rt, graph, client):
     put_route(graph, "/me/drive/items/P1:/a.txt:/content")
     tok = issue(rt, op="u", kind="drive_upload", target={"p": "P1", "n": "a.txt", "c": "fail"}, max_bytes=10)
-    assert rt.signer.claim(tok)  # an upload in progress on this link
+    assert run(rt.signer.claim(tok))  # an upload in progress on this link
     r = client.put(f"/u/{tok}", content=b"abc")
     assert r.status_code == 409 and "already" in r.json()["error"]
     assert graph.writes() == []
-    rt.signer.release(tok)
+    run(rt.signer.release(tok))
     assert client.put(f"/u/{tok}", content=b"abc").status_code == 200
 
 
@@ -494,3 +499,27 @@ def test_a_throttled_upload_is_passed_on_with_its_wait(rt, graph, client, status
     r = client.put(f"/u/{tok}", content=b"abc")
     assert r.status_code == status and r.headers["retry-after"] == "7" and "7 seconds" in r.json()["error"]
     assert client.put(f"/u/{tok}", content=b"abc").status_code == status, "a throttled upload leaves the link usable"
+
+
+def _unstored(rt):
+    """The same keys without the store: a link issued in the past (its expiry already gone) is the signed
+    value itself, since the store refuses to keep what has already expired."""
+    from m365_mcp.links.tokens import LinkSigner
+
+    return LinkSigner(rt.signer._sign, rt.signer._enc)
+
+
+@pytest.mark.parametrize("method, op", [("GET", "d"), ("PUT", "u")])
+def test_a_link_while_the_shared_store_is_down_is_503_with_a_wait_not_403(rt, graph, client, method, op):
+    # The link may be good: refusing it as invalid would send the agent for a new one it cannot get either.
+    from helpers import DownStore
+
+    kind = "drive" if op == "d" else "drive_upload"
+    target = {"i": "F1"} if op == "d" else {"p": "R1", "n": "a.txt", "c": "fail"}
+    tok = issue(rt, op=op, kind=kind, target=target)
+    from m365_mcp.links.store import LinkStore
+
+    rt.signer._store = rt.signer._uses = LinkStore(DownStore())
+    r = client.request(method, f"/{op}/{tok}", content=b"x" if op == "u" else None)
+    assert r.status_code == 503 and r.headers["Retry-After"] == "5" and "Try again" in r.json()["error"]
+    assert graph.seen == []

@@ -117,7 +117,7 @@ async def _recordings(c: Call, mid: str, subject: str, out: dict[str, Any], note
     found = []
     for r in items:
         name = _file_name(subject, "mp4")
-        url = c.link(op="d", kind="recording", target={"m": mid, "r": r["id"], "n": name})
+        url = await c.link(op="d", kind="recording", target={"m": mid, "r": r["id"], "n": name})
         found.append(
             compact(
                 {
@@ -145,6 +145,6 @@ async def _transcripts(c: Call, mid: str, subject: str, notes: list[str]) -> lis
     found = []
     for t in items:
         name = _file_name(subject, "vtt")
-        url = c.link(op="d", kind="transcript", target={"m": mid, "t": t["id"], "n": name, "a": "text/vtt"})
+        url = await c.link(op="d", kind="transcript", target={"m": mid, "t": t["id"], "n": name, "a": "text/vtt"})
         found.append(compact({"started": from_graph(t.get("createdDateTime"), c.tz), "download": _curl(name, url)}))
     return found

@@ -250,3 +250,30 @@ async def test_an_upload_url_on_microsofts_hosts_is_used(url):
 
     async with client(fake) as g:
         assert await g.upload_session(url, chunks(), 3) == {"id": "done"}
+
+
+async def test_every_upstream_request_is_counted_once_by_its_outcome():
+    from prometheus_client import REGISTRY
+
+    def count(cls: str) -> float:
+        return (
+            REGISTRY.get_sample_value(
+                "mcp_upstream_requests_total", {"server": "microsoft-365-mcp", "status_class": cls}
+            )
+            or 0.0
+        )
+
+    ok, err = count("2xx"), count("error")
+    answered = Graph("t", "p", transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"id": "x"})))
+    await answered.get("/me")
+    await answered.aclose()
+    assert (count("2xx"), count("error")) == (ok + 1, err)
+
+    def refuse(_request):
+        raise httpx.ConnectError("no route")
+
+    unanswered = Graph("t", "p", transport=httpx.MockTransport(refuse))
+    with pytest.raises(httpx.ConnectError):
+        await unanswered.monitor("https://graph.microsoft.com/v1.0/x")
+    await unanswered.aclose()
+    assert (count("2xx"), count("error")) == (ok + 1, err + 1)

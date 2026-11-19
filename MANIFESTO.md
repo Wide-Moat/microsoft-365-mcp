@@ -77,7 +77,7 @@ objects a person thinks in.
 
 15. **The person's own token, and only theirs.** The gateway holds the OAuth session and forwards
     the person's Graph bearer token on each call. This server stores no tokens beyond the sealed copy
-    an open file link holds in memory for its few minutes, has no service
+    an open file link holds for its few minutes (encrypted in the replicas' shared store), has no service
     account and no application permissions. *Violation:* any `client_credentials` flow; any
     `/users/{id}/…` path for someone other than `me`, except reading another person's free/busy,
     presence and profile, which Graph itself restricts to what the caller may see.

@@ -19,9 +19,11 @@ flowchart LR
 - **The Entra application** is one multi-tenant app registration, owned by the vendor. A
   customer's administrator consents to it once for their organisation; after that each person
   signs in to their own account. No customer creates an app registration.
-- **m365-mcp** keeps no state beyond the minutes a file link lives. It receives a call carrying a
-  bearer token for Graph, does the work, and returns a projection. The open links are held in its
-  memory (short ids, below), so it runs as one replica, and a restart loses the open links.
+- **m365-mcp** keeps no state beyond the minutes a file link lives and each person's send allowance.
+  It receives a call carrying a bearer token for Graph, does the work, and returns a projection. The
+  open links and the allowances live in a store every replica shares (Redis or Valkey, standalone or
+  behind Sentinel; [state](components/state.md)), so it runs as many replicas as the load needs and a
+  restart loses nothing. Without a store it keeps both in its own memory and runs one replica.
 - **The sandbox** is where the agent runs shell commands. It moves bytes (attachments, files,
   recordings, HTML letters) through short-lived signed links, so bytes never pass through the
   model.
@@ -144,7 +146,8 @@ but a valid signed link.
 | A leaked signed link | Expires in minutes, bound to one object, one operation, one person |
 | A leaked log | No content, no addresses, no tokens in logs |
 | A compromised gateway | Holds tokens already; this server adds no new secret except the link keys |
-| A compromised server pod | Sees tokens in flight, and the sealed copies behind open links (minutes; memory only, never disk) |
+| A compromised server pod | Sees tokens in flight, and can open the sealed copies behind open links (minutes) with the key it holds |
+| Someone who reads the state store | Ciphertext under the sealing key and keyed hashes: no token, no usable link, no person, address or draft id |
 | Throttling by Graph | Client paces below limits; honours `Retry-After`; tells the person how long to wait |
 | A large file exhausting memory | Streaming with spooled temp files; bounded chunk sizes |
 

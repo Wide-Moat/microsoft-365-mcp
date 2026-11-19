@@ -907,7 +907,7 @@ async def send_message(
             ]
         if files:
             payload["attachments"] = files
-        receipt = c.guard(
+        receipt = await c.guard(
             kind="teams_message",
             user_confirmed=user_confirmed,
             recipients=max(len(who_list), 1),
@@ -1065,7 +1065,7 @@ async def update_message(
         audience: list[str] = []
         if action != "delete" and c.rt.settings.allowed_recipient_domains:
             audience = await _member_addresses(c, me, team=team, chan=chan, chat=chat, nothing="Nothing was changed.")
-        receipt = c.guard(kind="teams_message", user_confirmed=user_confirmed, recipients=1, addresses=audience)
+        receipt = await c.guard(kind="teams_message", user_confirmed=user_confirmed, recipients=1, addresses=audience)
         if action == "edit":
             await c.graph.patch(path, {"body": {"contentType": "html", "content": prepared.html}})
         else:
@@ -1167,7 +1167,7 @@ async def save_chat(
         receipt = {}
         if adding or removing or topic:
             # Only people being added are checked: removing someone outside the domains is allowed.
-            receipt = c.guard(
+            receipt = await c.guard(
                 kind="chat_members",
                 user_confirmed=user_confirmed,
                 recipients=len(adding) + len(removing),

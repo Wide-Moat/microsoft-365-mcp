@@ -37,8 +37,8 @@ MUTATIONS = [
                 "        d = await _own_draft(c, id)",
             ),
             (
-                'receipt = c.guard(kind="mail", user_confirmed=user_confirmed,',
-                'receipt = c.guard(kind="mail", user_confirmed=True,',
+                '            kind="mail",\n            user_confirmed=user_confirmed,\n            recipients=len(addrs),',
+                '            kind="mail",\n            user_confirmed=True,\n            recipients=len(addrs),',
             ),
         ],
         "tests/unit/test_mail.py",
@@ -60,7 +60,12 @@ MUTATIONS = [
         ],
         "tests/unit/test_mail.py",
     ),
-    ("the send bucket", "core/guard.py", [("if b.tokens < 1:", "if False:")], "tests/unit/test_core.py"),
+    (
+        "the send bucket",
+        "core/guard.py",
+        [("        if not taken:\n", "        if False:\n")],
+        "tests/unit/test_core.py",
+    ),
     (
         "link signatures are checked",
         "links/tokens.py",
@@ -136,7 +141,7 @@ MUTATIONS = [
     (
         "a positioned box pushed off the page is dropped",
         "core/html.py",
-        [('    if s.get("position") in ("absolute", "fixed") and any(_far_off(', "    if False and any(_far_off(")],
+        [('    if s.get("position") in ("absolute", "fixed") and any(\n', "    if False and any(\n")],
         "tests/unit/test_html.py",
     ),
     (
@@ -240,13 +245,18 @@ MUTATIONS = [
         [("    logging.getLogger(_name).setLevel(logging.WARNING)", "    pass")],
         "tests/unit/test_core.py",
     ),
-    ("logs drop content", "observability.py", [("if _CONTENT.search(msg):", "if False:")], "tests/unit/test_core.py"),
+    (
+        "logs drop content",
+        "observability.py",
+        [("if _CONTENT.search(msg) or (isinstance(fields, dict) and _CONTENT.search(repr(fields))):", "if False:")],
+        "tests/unit/test_core.py",
+    ),
     (
         "a logged traceback loses every exception message",
         "observability.py",
         [
             (
-                "            record.exc_text = _bare_traceback(record.exc_info)\n            record.exc_info = None\n",
+                "            record.exc_text = bare_traceback(record.exc_info)\n            record.exc_info = None\n",
                 "            pass\n",
             )
         ],
@@ -418,7 +428,7 @@ MUTATIONS = [
         [
             (
                 '        try:\n            await c.graph.request("POST", f"/me/messages/{id}/send"',
-                '        c.rt.signer.revoke_draft(c.key, id)\n        try:\n            await c.graph.request("POST", f"/me/messages/{id}/send"',
+                '        await c.rt.signer.revoke_draft(c.key, id)\n        try:\n            await c.graph.request("POST", f"/me/messages/{id}/send"',
             )
         ],
         "tests/unit/test_link_routes_mail.py",
@@ -444,13 +454,18 @@ MUTATIONS = [
     (
         "an upload link delivers one file, once",
         "links/routes.py",
-        [("            signer.consume(value, link.expires)\n", "            signer.release(value)\n")],
+        [
+            (
+                "                await signer.consume(value, link.expires)\n",
+                "                await signer.release(value)\n",
+            )
+        ],
         "tests/unit/test_link_routes.py",
     ),
     (
         "one upload at a time on one link",
         "links/routes.py",
-        [("if signer is None or not signer.claim(value):", "if signer is None:")],
+        [("claimed = signer is not None and await signer.claim(value)", "claimed = signer is not None")],
         "tests/unit/test_link_routes.py",
     ),
     (
@@ -500,6 +515,271 @@ MUTATIONS = [
         ],
         "tests/unit/test_tasks.py",
     ),
+    # The runtime shared by replicas (0.2.0).
+    (
+        "a send fails closed while the shared store is down",
+        "core/guard.py",
+        [
+            (
+                '            raise M365Error("state_unavailable", outcome=_RATE_THEN.get(kind, "Nothing was sent.")) from None',
+                "            return CAPACITY",
+            )
+        ],
+        "tests/unit/test_mail.py::test_a_send_while_the_shared_store_is_down_sends_nothing",
+    ),
+    (
+        "no link is made while the shared store is down",
+        "core/context.py",
+        [
+            (
+                '            raise M365Error("state_unavailable", outcome="No link was made.") from None',
+                '            value = ""',
+            )
+        ],
+        "tests/unit/test_files.py::test_no_link_is_made_while_the_shared_store_is_down",
+    ),
+    (
+        "send_draft waits while it cannot tell whether an upload runs",
+        "tools/mail.py",
+        [
+            (
+                '        raise M365Error("state_unavailable", outcome="Nothing was sent; the draft is kept.") from None',
+                "        busy = False",
+            )
+        ],
+        "tests/unit/test_link_routes_mail.py::test_send_draft_refuses_while_it_cannot_tell_whether_an_upload_runs",
+    ),
+    (
+        "a link the store cannot check is 503, not refused",
+        "links/routes.py",
+        [
+            ('    except StoreUnavailable:\n        return _store_down("d")\n', ""),
+            (
+                '    except StoreUnavailable:\n        return _store_down("u")\n    except LinkRefused:',
+                "    except LinkRefused:",
+            ),
+        ],
+        "tests/unit/test_link_routes.py::test_a_link_while_the_shared_store_is_down_is_503_with_a_wait_not_403",
+    ),
+    (
+        "store names are keyed hashes, never the identifier",
+        "state/store.py",
+        [
+            (
+                '        return hmac.new(self._key, f"{kind}\\n{raw}".encode(), hashlib.sha256).hexdigest()[:32]',
+                "        return raw",
+            )
+        ],
+        "tests/unit/test_link_store.py::test_the_store_never_holds_a_usable_link",
+    ),
+    (
+        "a link issued under the previous key is still found during a rotation",
+        "links/store.py",
+        [
+            (
+                "        for state, secret in self._gens:\n            sealed",
+                "        for state, secret in self._gens[:1]:\n            sealed",
+            )
+        ],
+        "tests/unit/test_link_store.py::test_a_rotation_keeps_finding_what_the_previous_key_issued",
+    ),
+    (
+        "a link's value is ciphertext in the store",
+        "links/store.py",
+        [
+            (
+                '        sealed = nonce + _box(self._gens[0][1], key).encrypt(nonce, value.encode(), b"m365-mcp link")',
+                "        sealed = nonce + value.encode()",
+            ),
+            (
+                '            return _box(secret, key).decrypt(sealed[:12], sealed[12:], b"m365-mcp link").decode()',
+                "            return sealed[12:].decode()",
+            ),
+        ],
+        "tests/unit/test_link_store.py::test_the_store_never_holds_a_usable_link",
+    ),
+    (
+        "the memory store's bucket refuses past its capacity",
+        "state/memory.py",
+        [("                if b.tokens < 1:\n", "                if False:\n")],
+        "tests/state/test_store_contract.py",
+    ),
+    (
+        "a secret file others may read is refused",
+        "keys/files.py",
+        [("        if stat.S_IMODE(st.st_mode) & 0o077:\n", "        if False:\n")],
+        "tests/unit/test_config.py",
+    ),
+    (
+        "a secret file of another user is refused",
+        "keys/files.py",
+        [("        if st.st_uid != os.geteuid():\n", "        if False:\n")],
+        "tests/unit/test_config.py",
+    ),
+    (
+        "a secret file that is a link is refused",
+        "keys/files.py",
+        [("os.O_RDONLY | os.O_NOFOLLOW |", "os.O_RDONLY |")],
+        "tests/unit/test_config.py",
+    ),
+    (
+        "a key in a file and in the environment at once is refused",
+        "config.py",
+        [("        if key_file and in_env:\n", "        if False:\n")],
+        "tests/unit/test_config.py",
+    ),
+    (
+        "a store password in the environment is refused",
+        "config.py",
+        [("        if os.environ.get(secret):\n", "        if False:\n")],
+        "tests/unit/test_config.py",
+    ),
+    (
+        "credentials in the store URL are refused",
+        "config.py",
+        [("        if parts.password or parts.username:\n", "        if False:\n")],
+        "tests/unit/test_config.py",
+    ),
+    (
+        "metrics never on the MCP listener",
+        "app.py",
+        [
+            (
+                '            Route("/readyz", readyz),\n            Mount(',
+                '            Route("/readyz", readyz),\n            Route("/metrics", metrics),\n            Mount(',
+            )
+        ],
+        "tests/unit/test_app.py",
+    ),
+    (
+        "readiness never waits for the store",
+        "app.py",
+        [
+            (
+                '                "ok": True,\n                "areas"',
+                '                "ok": up,\n                "areas"',
+            ),
+            (
+                '                "store": "up" if up else "down",\n            }\n        )',
+                '                "store": "up" if up else "down",\n            },\n            status_code=200 if up else 503,\n        )',
+            ),
+        ],
+        "tests/unit/test_app.py",
+    ),
+    (
+        "every log line is JSON",
+        "logjson.py",
+        [
+            (
+                '        return json.dumps(out, separators=(",", ":"), ensure_ascii=False, default=str)',
+                "        return f\"{out['level']} {out['msg']}\"",
+            )
+        ],
+        "tests/unit/test_logs_json.py",
+    ),
+    (
+        "options in the store URL are refused",
+        "config.py",
+        [("        if parts.query or parts.fragment:\n", "        if False:\n")],
+        "tests/unit/test_config.py",
+    ),
+    (
+        "a delivered link is not claimed under another key",
+        "links/store.py",
+        [("        return state if sealed is not None else None\n", "        return state\n")],
+        "tests/unit/test_link_store.py",
+    ),
+    (
+        "memory forgets only a bucket that is full again",
+        "state/memory.py",
+        [("if v.full_at <= now]:", "if v.full_at <= now + 1e9]:")],
+        "tests/unit/test_link_store.py",
+    ),
+    (
+        "an upstream request that got no answer is counted",
+        "graph/client.py",
+        [
+            (
+                '            if not request.extensions.get("m365_answered"):\n                UPSTREAM_REQUESTS.labels("error").inc()\n',
+                "",
+            )
+        ],
+        "tests/unit/test_graph_client.py",
+    ),
+]
+# Mutations of the Lua scripts: they need the real stores, so scripts/state-contract.sh runs them
+# (python scripts/mutation_check.py --stores) in the network where Redis, Valkey and the Sentinels are.
+STORE_MUTATIONS = [
+    (
+        "Redis: a full store refuses a script before its first write",
+        "state/remote.py",
+        [('_SHEBANG = "#!lua\\n"', '_SHEBANG = ""')],
+        "tests/state/test_store_contract.py::test_a_full_store_refuses_and_the_operation_fails_closed",
+    ),
+    (
+        "Redis: a bucket refuses past its capacity",
+        "state/remote.py",
+        [("if tokens >= 1 then tokens = tokens - 1 taken = 1 end", "tokens = tokens - 1 taken = 1")],
+        "tests/state/test_store_contract.py",
+    ),
+    (
+        "Redis: one upload holds a link",
+        "state/remote.py",
+        [
+            (
+                "if redis.call('SET', KEYS[1], '1', 'NX', 'PX', ARGV[1]) then return 1 end",
+                "if redis.call('SET', KEYS[1], '1', 'PX', ARGV[1]) then return 1 end",
+            )
+        ],
+        "tests/state/test_store_contract.py",
+    ),
+    (
+        "Redis: a spent link cannot be claimed again",
+        "state/remote.py",
+        [("if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end\nif redis.call('SET'", "if redis.call('SET'")],
+        "tests/state/test_store_contract.py",
+    ),
+    (
+        "Redis: one owner is capped",
+        "state/remote.py",
+        [("if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[4]) then return 0 end\n", "")],
+        "tests/state/test_store_contract.py",
+    ),
+    (
+        "Redis: the store as a whole is capped",
+        "state/remote.py",
+        [("if redis.call('ZCARD', KEYS[3]) >= tonumber(ARGV[5]) then return 0 end\n", "")],
+        "tests/state/test_store_contract.py",
+    ),
+    (
+        "Redis: a live link is never overwritten",
+        "state/remote.py",
+        [("if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end\nlocal tag", "local tag")],
+        "tests/state/test_store_contract.py",
+    ),
+    (
+        "Redis: sending a draft spends its links",
+        "state/remote.py",
+        [("  if ms > 0 then redis.call('SET', ARGV[3] .. m, '1', 'PX', ms) end\n", "")],
+        "tests/state/test_store_contract.py",
+    ),
+    (
+        "Redis: a busy upload is seen under its draft",
+        "state/remote.py",
+        [("  if redis.call('EXISTS', ARGV[1] .. m) == 1 then return 1 end\n", "")],
+        "tests/state/test_store_contract.py",
+    ),
+    (
+        "Redis: names are keyed hashes",
+        "state/store.py",
+        [
+            (
+                '        return hmac.new(self._key, f"{kind}\\n{raw}".encode(), hashlib.sha256).hexdigest()[:32]',
+                "        return raw",
+            )
+        ],
+        "tests/state/test_store_contract.py::test_no_name_or_value_in_the_store_carries_an_identifier",
+    ),
 ]
 
 
@@ -545,11 +825,20 @@ def run(*selectors: str) -> int:
 
 
 def main() -> int:
+    stores = "--stores" in sys.argv[1:]
+    chosen = STORE_MUTATIONS if stores else MUTATIONS
+    # A failover takes its own half minute and tests none of the scripts: it is not run per mutation.
+    extra = ("-k", "not failover") if stores else ()
+    if not stores:
+        print(
+            f"{len(STORE_MUTATIONS)} mutations of the store scripts need real servers: scripts/state-contract.sh "
+            "runs them with --stores"
+        )
     failures = []
-    for what, rel, edits, selector in MUTATIONS:
+    for what, rel, edits, selector in chosen:
         try:
             with mutated(rel, edits):
-                code = run(selector)
+                code = run(selector, *extra)
         except GuardNotFound as e:
             failures.append(f"{what}: {e}")
             continue
@@ -559,9 +848,9 @@ def main() -> int:
             failures.append(f"{what}: tests still pass with the guard removed")
         elif code != 1:
             failures.append(f"{what}: pytest exited {code}, which is not a failing test")
-    if run("tests/unit/test_core.py") != 0:
+    if run("tests/state/test_store_contract.py" if stores else "tests/unit/test_core.py", *extra) != 0:
         failures.append("the suite does not pass after restoring the code")
-    print(f"\n{len(MUTATIONS)} mutations, {len(failures)} problems")
+    print(f"\n{len(chosen)} mutations, {len(failures)} problems")
     for f in failures:
         print(" -", f)
     return 1 if failures else 0

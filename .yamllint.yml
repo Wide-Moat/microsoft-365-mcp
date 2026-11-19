@@ -9,3 +9,5 @@ rules:
   comments:
     min-spaces-from-content: 1
   document-start: disable
+ignore: |
+  charts/*/templates/

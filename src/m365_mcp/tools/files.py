@@ -767,7 +767,7 @@ async def download_file(
             target["d"] = drive
         if format == "pdf":
             target["f"] = "pdf"
-        url = c.link(op="d", kind="drive", target=target)
+        url = await c.link(op="d", kind="drive", target=target)
         return compact(
             {
                 "name": target["n"],
@@ -833,7 +833,7 @@ async def upload_file(
         target: dict[str, Any] = {"p": f["id"], "n": clean, "c": on_conflict}
         if drive:
             target["d"] = drive
-        url = c.link(op="u", kind="drive_upload", target=target, max_bytes=MAX_UPLOAD)
+        url = await c.link(op="u", kind="drive_upload", target=target, max_bytes=MAX_UPLOAD)
         return {
             "folder": folder.strip("/") or "(top level)",
             "name": clean,
@@ -1118,7 +1118,7 @@ async def share_file(
         base = dv.item_url(drive, id)
         if action == "link":
             try:
-                receipt = c.guard(kind="share", user_confirmed=user_confirmed, recipients=0)
+                receipt = await c.guard(kind="share", user_confirmed=user_confirmed, recipients=0)
             except M365Error as e:
                 raise _confirm_share(e, f"A {role} link for people inside the organisation only", None) from None
             made = await c.graph.post(f"{base}/createLink", {"type": role, "scope": "organization"}) or {}
@@ -1132,7 +1132,7 @@ async def share_file(
         who = await recipients(c, people)
         if action == "invite":
             try:
-                receipt = c.guard(
+                receipt = await c.guard(
                     kind="share",
                     user_confirmed=user_confirmed,
                     recipients=len(who),

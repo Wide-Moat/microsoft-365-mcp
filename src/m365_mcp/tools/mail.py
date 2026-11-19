@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import logging
 import re
 import secrets
 from datetime import UTC
@@ -43,6 +44,9 @@ from m365_mcp.core.resolve import (
 from m365_mcp.core.time import from_graph, parse
 from m365_mcp.graph.errors import GraphError, to_person_error
 from m365_mcp.registry import tool
+from m365_mcp.state.store import StoreUnavailable
+
+log = logging.getLogger("m365_mcp.mail")
 
 # Marks drafts this server created; only those may be changed or sent here. Its value is the id of
 # the draft's own new-text part ("1" on drafts made before part ids existed), and "sent" once
@@ -531,7 +535,7 @@ async def _attachment_links(c: Call, message_id: str) -> list[dict[str, Any]]:
         else:
             if kind.endswith("itemAttachment") and not name.lower().endswith(".eml"):
                 name += ".eml"
-            url = c.link(op="d", kind="attachment", target={"m": message_id, "a": a["id"]})
+            url = await c.link(op="d", kind="attachment", target={"m": message_id, "a": a["id"]})
             item["download"] = f"curl -sS --fail-with-body -o {_shell_name(name)} '{url}'"
         out.append(item)
     return out
@@ -898,7 +902,7 @@ async def save_draft(
                 "not made: Microsoft did not list the organisation's domains, so check the addresses yourself."
             )
         if body_upload:
-            url = c.link(
+            url = await c.link(
                 op="u", kind="draft_body", target={"d": draft_id}, max_bytes=2 * 1024 * 1024, content_type="text/html"
             )
             # The field is the command and nothing else, so it runs as issued.
@@ -912,7 +916,7 @@ async def save_draft(
         if attachments_upload:
             out["attachment_uploads"] = [
                 "curl -sS --fail-with-body -T <file> -H 'Content-Type: application/octet-stream' "
-                f"-H 'X-File-Name: <name>' '{c.link(op='u', kind='draft_attachment', target={'d': draft_id}, max_bytes=MAX_ATTACHMENT)}'"
+                f"-H 'X-File-Name: <name>' '{await c.link(op='u', kind='draft_attachment', target={'d': draft_id}, max_bytes=MAX_ATTACHMENT)}'"
                 for _ in range(attachments_upload)
             ]
         if attachments_upload:
@@ -959,8 +963,15 @@ async def _unconfirmed(c: Call, draft_id: str) -> M365Error:
     return M365Error("confirm")
 
 
-def _refuse_while_uploading(c: Call, draft_id: str) -> None:
-    if c.rt.signer is not None and c.rt.signer.draft_busy(c.key, draft_id):
+async def _refuse_while_uploading(c: Call, draft_id: str) -> None:
+    if c.rt.signer is None:
+        return
+    try:
+        busy = await c.rt.signer.draft_busy(c.key, draft_id)
+    except StoreUnavailable:
+        # Whether an upload is still running cannot be known: sending now could send half a letter.
+        raise M365Error("state_unavailable", outcome="Nothing was sent; the draft is kept.") from None
+    if busy:
         raise invalid(
             "An upload to this draft is still running. Wait for it to finish, then call send_draft "
             "again. Nothing was sent."
@@ -988,7 +999,7 @@ async def send_draft(
             raise invalid("The draft has no recipients. Add them with save_draft, then send it. Nothing was sent.")
         addrs = [(r.get("emailAddress") or {}).get("address", "") for r in everyone]
         resolved = await recipients(c, addrs) if len(addrs) <= 20 else []
-        receipt = c.guard(
+        receipt = await c.guard(
             kind="mail",
             user_confirmed=user_confirmed,
             recipients=len(addrs),
@@ -997,7 +1008,7 @@ async def send_draft(
         )
         # An upload into the draft past its check of the draft would add a body or a file the person
         # never saw: wait for it, before anything is written.
-        _refuse_while_uploading(c, id)
+        await _refuse_while_uploading(c, id)
         # Marked sent before it is sent, against the etag just read, so neither a second call in the
         # seconds Exchange keeps the sent draft in Drafts nor a concurrent one sends it again.
         before = _mark_value(d) or LEGACY_MARK
@@ -1012,7 +1023,7 @@ async def send_draft(
         # its link before the mark landed may have read the draft unmarked: it is seen here, and the
         # mark is taken back.
         try:
-            _refuse_while_uploading(c, id)
+            await _refuse_while_uploading(c, id)
         except M365Error:
             with contextlib.suppress(GraphError):
                 await c.graph.patch(f"/me/messages/{id}", _mark(before))
@@ -1049,6 +1060,11 @@ async def send_draft(
         # Sent: what the person agreed to is what went out, and the draft's upload links are spent. Not
         # before, so a send that failed leaves the links that the refusal says to use again.
         if c.rt.signer is not None:
-            c.rt.signer.revoke_draft(c.key, id)
+            try:
+                await c.rt.signer.revoke_draft(c.key, id)
+            except StoreUnavailable:
+                # Sent already; the draft's upload links expire within minutes, and an upload into a sent
+                # draft is refused by the links route, which reads the draft first.
+                log.warning("the sent draft's upload links could not be revoked", extra={"event": "revoke_failed"})
         subject = content_line("the draft", d["subject"]) if d.get("subject") else None
         return {"sent": True, "subject": subject, "to": whos(d.get("toRecipients")), **shown(receipt)}

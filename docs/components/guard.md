@@ -65,10 +65,13 @@ The guard's own refusals, below every tool that calls it; each tool's rows are i
 
 ## State
 
-The bucket lives in process memory, keyed by person hash. Several replicas each hold their own
-bucket; that multiplies the burst, not the steady rate beyond what the gateway's own per-key limits
-allow. A shared store can replace it behind the same interface if an installation needs a strict
-global limit.
+The bucket lives in the store every replica shares ([state](state.md)), under a keyed hash of the
+person: ten at once and one every six seconds per person across all replicas, taken in one atomic
+step, so two replicas never both grant the last send. A store that does not answer refuses the send
+with "try again in a few seconds" (`state_unavailable`); no replica grants an allowance of its own.
+Without a store (one replica) the bucket is the process's memory.
+
+The checks before the bucket (confirmation, recipients, lists, domains) need no state.
 
 ## Tests
 

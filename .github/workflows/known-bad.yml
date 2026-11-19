@@ -1,0 +1,63 @@
+# The chart e2e against an image built from a commit before the shared state store (0.1.x by default): every
+# check that tests what 0.2.0 added must fail there, or the check proves nothing. Run by hand when the e2e
+# changes; its log is the evidence the pull request cites. GitHub-hosted runners only. A push to a branch
+# known-bad/<anything> runs it too, before this file is on the default branch.
+name: known-bad
+
+on:
+  push:
+    branches: ["known-bad/**"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The commit to build the known-bad image from
+        default: 01f6c4604fe3e11788bd96d438da678ef538ba0f
+        required: true
+
+permissions:
+  contents: read
+
+# A newer push to the same known-bad branch replaces the run; a manual run with another ref is its own.
+concurrency:
+  group: known-bad-${{ github.event_name }}-${{ github.ref }}-${{ inputs.ref || 'default' }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || '01f6c4604fe3e11788bd96d438da678ef538ba0f' }}
+          path: old
+      - name: build the old image
+        run: |
+          set -euo pipefail
+          docker build -t microsoft-365-mcp:old old
+          docker run --rm --entrypoint python microsoft-365-mcp:old \
+            -c 'import m365_mcp; print("old image", m365_mcp.__version__)'
+      - name: a cluster, with metrics-server for the autoscaler
+        run: |
+          set -euo pipefail
+          kind create cluster --name e2e --wait 120s
+          kind load docker-image microsoft-365-mcp:old --name e2e
+          curl -fsSL --retry 3 -o /tmp/metrics-server.yaml \
+            https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
+          echo "ff64d1a13b9ac3b0635f0dd985815fb44c23eed4706c04e5db1daadf6bc0a83b  /tmp/metrics-server.yaml" \
+            | sha256sum -c -
+          kubectl apply -f /tmp/metrics-server.yaml
+          kubectl -n kube-system patch deployment metrics-server --type json \
+            -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+          kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
+      - name: the current checks against the old image
+        run: IMAGE=microsoft-365-mcp:old KNOWN_BAD=1 scripts/chart-e2e.sh
+      - name: what the cluster saw
+        if: failure()
+        run: |
+          kubectl -n m365-e2e get pods -o wide || true
+          kubectl -n m365-e2e logs -l app.kubernetes.io/instance=e2e --all-containers --tail=40 || true

@@ -52,11 +52,11 @@ async def test_recording_and_transcript_come_back_as_signed_download_commands(gr
         and rec["started"]
         and rec_cmd.startswith("curl -sS --fail-with-body -o 'Planning _review_.mp4'")
     )
-    link = rt.signer.verify(link_of(rec_cmd), op="d")
+    link = await rt.signer.verify(link_of(rec_cmd), op="d")
     assert link.kind == "recording" and link.target == {"m": "mt1", "r": "r1", "n": "Planning _review_.mp4"}
     assert link.person == current_person().key
     (trn,) = r.data["transcripts"]
-    tl = rt.signer.verify(link_of(trn_cmd), op="d")
+    tl = await rt.signer.verify(link_of(trn_cmd), op="d")
     assert tl.kind == "transcript" and tl.target == {
         "m": "mt1",
         "t": "t1",

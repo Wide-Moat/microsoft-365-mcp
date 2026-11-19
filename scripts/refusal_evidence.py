@@ -28,7 +28,7 @@ from refusal_map import ROOT, TEST_ROOT, check, collected, documents, mapped_tes
 # Shared removals, named once.
 CONFIRM_GUARD = ("core/guard.py", [("if needs_confirmation and user_confirmed is not True:", "if False:")])
 RECIPIENT_CAP = ("if recipients > MAX_RECIPIENTS:", "if False:")
-BUCKET = ("core/guard.py", [("if b.tokens < 1:", "if False:")])
+BUCKET = ("core/guard.py", [("        if not taken:\n", "        if False:\n")])
 OWN_DRAFT = (
     "tools/mail.py",
     [
@@ -55,8 +55,8 @@ DOMAIN_CHECK = (
     "core/guard.py",
     [
         (
-            '        if outside:\n            raise M365Error("outside_domains"',
-            '        if False:\n            raise M365Error("outside_domains"',
+            '        if outside:\n            GUARD_REFUSALS.labels("outside_domains").inc()\n            raise M365Error("outside_domains"',
+            '        if False:\n            GUARD_REFUSALS.labels("outside_domains").inc()\n            raise M365Error("outside_domains"',
         )
     ],
 )
@@ -68,9 +68,33 @@ UPDATE_MEMBERS = (
     [('if action != "delete" and c.rt.settings.allowed_recipient_domains:', "if False:")],
 )
 
-UPLOAD_RUNNING = (
+UPLOAD_RUNNING = ("tools/mail.py", [("    if busy:\n        raise invalid(", "    if False:\n        raise invalid(")])
+STORE_DOWN_SEND = (
+    "core/guard.py",
+    [
+        (
+            '            raise M365Error("state_unavailable", outcome=_RATE_THEN.get(kind, "Nothing was sent.")) from None',
+            "            return CAPACITY",
+        )
+    ],
+)
+STORE_DOWN_BUSY = (
     "tools/mail.py",
-    [("    if c.rt.signer is not None and c.rt.signer.draft_busy(c.key, draft_id):\n", "    if False:\n")],
+    [
+        (
+            '        raise M365Error("state_unavailable", outcome="Nothing was sent; the draft is kept.") from None',
+            "        busy = False",
+        )
+    ],
+)
+STORE_DOWN_LINK = (
+    "core/context.py",
+    [
+        (
+            '            raise M365Error("state_unavailable", outcome="No link was made.") from None',
+            '            value = ""',
+        )
+    ],
 )
 
 LIST_CURSOR = (
@@ -140,8 +164,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "graph/errors.py",
         [
             (
-                "    if e.status == 400 and (code in INVALID_ID_CODES or inner in INVALID_ID_CODES\n",
-                "    if False and (code in INVALID_ID_CODES or inner in INVALID_ID_CODES\n",
+                "    if e.status == 400 and (\n        code in INVALID_ID_CODES or inner in INVALID_ID_CODES",
+                "    if False and (\n        code in INVALID_ID_CODES or inner in INVALID_ID_CODES",
             )
         ],
     ),
@@ -332,8 +356,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
                 "        d = await _own_draft(c, id)",
             ),
             (
-                'receipt = c.guard(kind="mail", user_confirmed=user_confirmed,',
-                'receipt = c.guard(kind="mail", user_confirmed=True,',
+                '            kind="mail",\n            user_confirmed=user_confirmed,',
+                '            kind="mail",\n            user_confirmed=True,',
             ),
         ],
     ),
@@ -342,14 +366,14 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/mail.py",
         [
             (
-                '    if not d.get("isDraft"):\n        raise invalid("That message is not a draft any more: it was sent',
-                '    if False:\n        raise invalid("That message is not a draft any more: it was sent',
+                '    if not d.get("isDraft"):\n        raise invalid(\n            "That message is not a draft any more',
+                '    if False:\n        raise invalid(\n            "That message is not a draft any more',
             )
         ],
     ),
     "test_mail.py::test_send_refuses_a_list_added_after_the_draft": (
         "tools/mail.py",
-        [("group_addresses=groups_among(resolved), addresses=addrs)", "group_addresses=None, addresses=addrs)")],
+        [("            group_addresses=groups_among(resolved),\n", "            group_addresses=None,\n")],
     ),
     "test_mail.py::test_send_refuses_recipients_grown_past_20": ("core/guard.py", [RECIPIENT_CAP]),
     "test_mail.py::test_send_refuses_a_draft_already_sent": (
@@ -363,7 +387,12 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "test_mail.py::test_bucket_stops_the_eleventh_send": BUCKET,
     "test_recipient_domains.py::test_send_draft_refuses_a_recipient_outside_the_allowed_domains": (
         "tools/mail.py",
-        [("group_addresses=groups_among(resolved), addresses=addrs)", "group_addresses=groups_among(resolved))")],
+        [
+            (
+                "            group_addresses=groups_among(resolved),\n            addresses=addrs,\n",
+                "            group_addresses=groups_among(resolved),\n",
+            )
+        ],
     ),
     "test_autoreply.py::test_scheduled_without_both_dates_is_refused": (
         "tools/autoreply.py",
@@ -400,8 +429,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/calendar.py",
         [
             (
-                'c.guard(kind="event", user_confirmed=user_confirmed, recipients=invited,\n',
-                'c.guard(kind="event", user_confirmed=True, recipients=invited,\n',
+                '                kind="event",\n                user_confirmed=user_confirmed,',
+                '                kind="event",\n                user_confirmed=True,',
             )
         ],
     ),
@@ -409,14 +438,17 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/calendar.py",
         [
             ("if attendees is not None and len(attendees) > MAX_ATTENDEES:", "if False:"),
-            ("recipients=invited,\n", "recipients=0,\n"),
+            (
+                "                user_confirmed=user_confirmed,\n                recipients=invited,\n",
+                "                user_confirmed=user_confirmed,\n                recipients=0,\n",
+            ),
         ],
     ),
     "test_calendar.py::test_a_distribution_list_is_refused": (
         "tools/calendar.py",
         [
             ('            if groups:\n                raise M365Error("distribution_list", address=groups[0])\n', ""),
-            ("group_addresses=groups_among(found), addresses=notified)", "group_addresses=None, addresses=notified)"),
+            ("                group_addresses=groups_among(found),\n", "                group_addresses=None,\n"),
         ],
     ),
     "test_calendar.py::test_zero_or_negative_duration_is_refused": (
@@ -429,7 +461,12 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     ),
     "test_recipient_domains.py::test_inviting_an_attendee_outside_the_allowed_domains_is_refused": (
         "tools/calendar.py",
-        [("group_addresses=groups_among(found), addresses=notified)", "group_addresses=groups_among(found))")],
+        [
+            (
+                "                group_addresses=groups_among(found),\n                addresses=notified,\n",
+                "                group_addresses=groups_among(found),\n",
+            )
+        ],
     ),
     "test_calendar.py::test_find_meeting_times_more_than_20_people_or_a_group_is_refused": (
         "tools/calendar.py",
@@ -457,8 +494,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/calendar.py",
         [
             (
-                'c.guard(kind="event_response", user_confirmed=user_confirmed, recipients=1,',
-                'c.guard(kind="event_response", user_confirmed=True, recipients=1,',
+                'kind="event_response", user_confirmed=user_confirmed, recipients=1,',
+                'kind="event_response", user_confirmed=True, recipients=1,',
             )
         ],
     ),
@@ -468,7 +505,7 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     ),
     "test_recipient_domains.py::test_a_comment_to_an_organiser_outside_the_allowed_domains_is_refused": (
         "tools/calendar.py",
-        [('addresses=[org] if org else [""])', "addresses=None)")],
+        [('addresses=[org] if org else [""]\n', "addresses=None\n")],
     ),
     # -- recordings ---------------------------------------------------------------------------
     "test_recordings.py::test_an_event_that_is_not_a_teams_meeting_is_refused": (
@@ -514,12 +551,12 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/files.py",
         [
             (
-                'receipt = c.guard(kind="share", user_confirmed=user_confirmed, recipients=0)',
-                'receipt = c.guard(kind="share", user_confirmed=True, recipients=0)',
+                'receipt = await c.guard(kind="share", user_confirmed=user_confirmed, recipients=0)',
+                'receipt = await c.guard(kind="share", user_confirmed=True, recipients=0)',
             ),
             (
-                'receipt = c.guard(kind="share", user_confirmed=user_confirmed, recipients=len(who),',
-                'receipt = c.guard(kind="share", user_confirmed=True, recipients=len(who),',
+                '                    kind="share",\n                    user_confirmed=user_confirmed,',
+                '                    kind="share",\n                    user_confirmed=True,',
             ),
         ],
     ),
@@ -535,8 +572,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/files.py",
         [
             (
-                "group_addresses=groups_among(who), addresses=[w.address for w in who])",
-                "group_addresses=groups_among(who))",
+                "                    addresses=[w.address for w in who],\n",
+                "",
             )
         ],
     ),
@@ -582,8 +619,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
                 "        if False:\n            # Only reads so far.",
             ),
             (
-                'c.guard(kind="teams_message", user_confirmed=user_confirmed, recipients=max(',
-                'c.guard(kind="teams_message", user_confirmed=True, recipients=max(',
+                '            kind="teams_message",\n            user_confirmed=user_confirmed,',
+                '            kind="teams_message",\n            user_confirmed=True,',
             ),
         ],
     ),
@@ -598,7 +635,12 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     ),
     "test_recipient_domains.py::test_a_teams_message_to_someone_outside_the_allowed_domains_is_refused": (
         "tools/teams.py",
-        [("group_addresses=groups_among(who_list), addresses=audience)", "group_addresses=groups_among(who_list))")],
+        [
+            (
+                "            group_addresses=groups_among(who_list),\n            addresses=audience,\n",
+                "            group_addresses=groups_among(who_list),\n",
+            )
+        ],
     ),
     "test_recipient_domains.py::test_a_message_to_an_existing_chat_with_an_outside_member_is_refused": (
         "tools/teams.py",
@@ -612,8 +654,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/teams.py",
         [
             (
-                'receipt = c.guard(kind="teams_message", user_confirmed=user_confirmed, recipients=1, addresses=audience)',
-                'receipt = c.guard(kind="teams_message", user_confirmed=True, recipients=1, addresses=audience)',
+                'receipt = await c.guard(kind="teams_message", user_confirmed=user_confirmed, recipients=1, addresses=audience)',
+                'receipt = await c.guard(kind="teams_message", user_confirmed=True, recipients=1, addresses=audience)',
             )
         ],
     ),
@@ -626,8 +668,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/teams.py",
         [
             (
-                'c.guard(kind="chat_members", user_confirmed=user_confirmed,',
-                'c.guard(kind="chat_members", user_confirmed=True,',
+                '                kind="chat_members",\n                user_confirmed=user_confirmed,',
+                '                kind="chat_members",\n                user_confirmed=True,',
             )
         ],
     ),
@@ -637,7 +679,7 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     ),
     "test_recipient_domains.py::test_a_cancellation_comment_to_an_attendee_outside_the_allowed_domains_is_refused": (
         "tools/calendar.py",
-        [("addresses=[_address(a) for a in _humans(e)] if comment else None)", "addresses=None)")],
+        [("addresses=[_address(a) for a in _humans(e)] if comment else None,", "addresses=None,")],
     ),
     "test_recipient_domains.py::test_a_channel_post_with_a_member_outside_the_allowed_domains_is_refused": (
         "tools/teams.py",
@@ -656,7 +698,7 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "test_recipient_domains.py::test_changing_a_channel_post_with_an_outside_member_is_refused": UPDATE_MEMBERS,
     "test_recipient_domains.py::test_adding_a_chat_member_outside_the_allowed_domains_is_refused": (
         "tools/teams.py",
-        [("addresses=[w.address for w in adding])", "addresses=None)")],
+        [("                addresses=[w.address for w in adding],\n", "                addresses=None,\n")],
     ),
     # -- the shared resolver ------------------------------------------------------------------
     "test_recipients.py::test_save_draft_refuses_an_internal_address_that_is_no_person": NOT_A_PERSON,
@@ -690,10 +732,13 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     ),
     # One check, called before the sent mark and after it; removing it removes both.
     "test_link_routes_mail.py::test_send_draft_refuses_while_an_upload_to_the_draft_is_running": UPLOAD_RUNNING,
+    "test_mail.py::test_a_send_while_the_shared_store_is_down_sends_nothing": STORE_DOWN_SEND,
+    "test_link_routes_mail.py::test_send_draft_refuses_while_it_cannot_tell_whether_an_upload_runs": STORE_DOWN_BUSY,
+    "test_files.py::test_no_link_is_made_while_the_shared_store_is_down": STORE_DOWN_LINK,
     "test_link_routes_mail.py::test_an_upload_starting_while_the_draft_is_marked_sent_stops_the_send": UPLOAD_RUNNING,
     "test_link_routes_mail.py::test_sending_a_draft_revokes_its_upload_links": (
         "tools/mail.py",
-        [("            c.rt.signer.revoke_draft(c.key, id)\n", "            pass\n")],
+        [("                await c.rt.signer.revoke_draft(c.key, id)\n", "                pass\n")],
     ),
     "test_recipients.py::test_a_contact_holding_a_group_people_knows_is_refused_even_outside": (
         "core/resolve.py",
@@ -808,8 +853,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         [
             ("        if not chat and len(adding) < 2:\n", "        if False:\n"),
             (
-                "                       if w.address.casefold() not in _mine(me)}.values())",
-                "                       }.values()) + []",
+                "                if w.address.casefold() not in _mine(me)\n",
+                "",
             ),
         ],
     ),
@@ -862,8 +907,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/files.py",
         [
             (
-                '                if location == "shared":\n                    raise M365Error("unsupported"',
-                '                if False:\n                    raise M365Error("unsupported"',
+                '                if location == "shared":\n                    raise M365Error(\n                        "unsupported"',
+                '                if False:\n                    raise M365Error(\n                        "unsupported"',
             )
         ],
     ),
@@ -927,8 +972,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/teams.py",
         [
             (
-                '                if next_page:\n                    raise invalid("This chat has more members',
-                '                if False:\n                    raise invalid("This chat has more members',
+                '                if next_page:\n                    raise invalid(\n                        "This chat has more members',
+                '                if False:\n                    raise invalid(\n                        "This chat has more members',
             )
         ],
     ),
@@ -944,8 +989,8 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         "tools/teams.py",
         [
             (
-                '    raise invalid(f"That post is not among the latest',
-                '    raise M365Error("not_found")\n    raise invalid(f"That post is not among the latest',
+                '    raise invalid(\n        f"That post is not among the latest',
+                '    raise M365Error("not_found")\n    raise invalid(\n        f"That post is not among the latest',
             )
         ],
     ),
@@ -1034,7 +1079,12 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     ),
     "test_excel.py::test_a_formula_excel_refuses_is_named": (
         "tools/excel.py",
-        [('if e.status == 400 and e.code == "InvalidArgument" and any(', "if False and any(")],
+        [
+            (
+                '                        e.status == 400\n                        and e.code == "InvalidArgument"\n',
+                "                        False\n",
+            )
+        ],
     ),
 }
 

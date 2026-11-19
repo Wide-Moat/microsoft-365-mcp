@@ -19,7 +19,7 @@ async def test_turning_it_off_needs_no_confirmation_and_no_bucket(graph, invoke,
     r = await invoke("save_automatic_reply", status="off")
     assert not r.error, r.text
     assert sent(graph) == {"status": "disabled"}
-    assert r.data == {"automatic_reply": "off"} and guard._buckets == {}
+    assert r.data == {"automatic_reply": "off"} and guard.store.bucket_count() == 0
 
 
 async def test_turning_it_on_without_confirmation_writes_nothing(graph, invoke):

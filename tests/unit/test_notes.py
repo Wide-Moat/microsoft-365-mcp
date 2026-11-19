@@ -101,7 +101,7 @@ async def test_get_note_page_marks_text_and_lists_resources_as_links(graph, invo
     assert img["name"].endswith(".png") and img["kind"] == "image"
     assert obj["name"] == "budget.xlsx" and obj["kind"] == "file"
     token = img["download"].split(f"{LINKS}/d/")[1].rstrip("'")
-    link = rt.signer.verify(token, op="d")
+    link = await rt.signer.verify(token, op="d")
     assert link.kind == "note_resource" and link.target["r"] == "RES-FULL"
     assert "RES-SMALL" not in r.text
 
@@ -277,11 +277,11 @@ async def test_body_upload_issues_a_note_body_link(graph, invoke, rt):
     r = await invoke("save_note_page", section="Ideas", title="Big", body_upload=True)
     assert not r.error, r.text
     token = r.data["body_upload"].split(f"{LINKS}/u/")[1].split("'")[0]
-    link = rt.signer.verify(token, op="u")
+    link = await rt.signer.verify(token, op="u")
     assert link.kind == "note_body" and link.target == {"s": "S1", "title": "Big"}
     r = await invoke("save_note_page", id="p1", action="append", body_upload=True)
     token = r.data["body_upload"].split(f"{LINKS}/u/")[1].split("'")[0]
-    assert rt.signer.verify(token, op="u").target == {"page": "p1", "a": "append"}
+    assert (await rt.signer.verify(token, op="u")).target == {"page": "p1", "a": "append"}
     assert graph.writes() == []
 
 

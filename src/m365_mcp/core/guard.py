@@ -5,9 +5,11 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 
 from m365_mcp.core.errors import M365Error
+from m365_mcp.observability import GUARD_REFUSALS
+from m365_mcp.state.memory import MemoryStore
+from m365_mcp.state.store import StateStore, StoreUnavailable
 
 MAX_RECIPIENTS = 20
 CAPACITY = 10
@@ -34,31 +36,26 @@ _UNDONE = {
 }
 
 
-@dataclass
-class _Bucket:
-    tokens: float
-    at: float
-
-
 class Guard:
-    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
-        self._clock = clock
-        self._buckets: dict[str, _Bucket] = {}
+    """The checks, then one token from the person's bucket in the shared store: every replica draws from the
+    same allowance. A store that does not answer refuses the send rather than grant an allowance of its own."""
 
-    def _take(self, person: str, kind: str = "") -> int:
-        now = self._clock()
-        b = self._buckets.get(person)
-        if b is None:
-            b = self._buckets[person] = _Bucket(CAPACITY, now)
-        b.tokens = min(CAPACITY, b.tokens + (now - b.at) * REFILL_PER_SECOND)
-        b.at = now
-        if b.tokens < 1:
-            wait = math.ceil((1 - b.tokens) / REFILL_PER_SECOND)
+    def __init__(self, store: StateStore | None = None, *, clock: Callable[[], float] = time.time) -> None:
+        self.store: StateStore = store if store is not None else MemoryStore(clock=clock)
+
+    async def _take(self, person: str, kind: str = "") -> int:
+        try:
+            taken, tokens = await self.store.take(person, capacity=CAPACITY, refill_per_second=REFILL_PER_SECOND)
+        except StoreUnavailable:
+            GUARD_REFUSALS.labels("state_unavailable").inc()
+            raise M365Error("state_unavailable", outcome=_RATE_THEN.get(kind, "Nothing was sent.")) from None
+        if not taken:
+            GUARD_REFUSALS.labels("rate").inc()
+            wait = math.ceil((1 - tokens) / REFILL_PER_SECOND)
             raise M365Error("rate", seconds=wait, then=_RATE_THEN.get(kind, "Nothing was sent."))
-        b.tokens -= 1
-        return int(b.tokens)
+        return int(tokens)
 
-    def check(
+    async def check(
         self,
         person: str,
         *,
@@ -72,15 +69,19 @@ class Guard:
     ) -> dict:
         """Call before the Graph request. Returns the receipt the tool includes in its result."""
         if needs_confirmation and user_confirmed is not True:
+            GUARD_REFUSALS.labels("confirm").inc()
             raise M365Error("confirm", outcome=_UNDONE.get(kind, "Nothing was sent."))
         if recipients > MAX_RECIPIENTS:
+            GUARD_REFUSALS.labels("too_many_recipients").inc()
             raise M365Error("too_many_recipients", limit=MAX_RECIPIENTS, count=recipients)
         if group_addresses:
+            GUARD_REFUSALS.labels("distribution_list").inc()
             raise M365Error("distribution_list", address=group_addresses[0])
         outside = outside_domains(addresses or [], allowed_domains)
         if outside:
+            GUARD_REFUSALS.labels("outside_domains").inc()
             raise M365Error("outside_domains", domains=", ".join(outside))
-        left = self._take(person, kind)
+        left = await self._take(person, kind)
         return {"kind": kind, "recipients": recipients, "sends_left_now": left}
 
 

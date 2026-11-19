@@ -1,0 +1,12 @@
+apiVersion: v2
+name: microsoft-365-mcp
+description: MCP server for one person's Microsoft 365 through Microsoft Graph, for an AI assistant
+type: application
+# The release workflow refuses a tag that differs from version and appVersion.
+version: 0.2.0
+appVersion: "0.2.0"
+home: https://github.com/wide-moat/microsoft-365-mcp
+sources:
+  - https://github.com/wide-moat/microsoft-365-mcp
+annotations:
+  licenses: Apache-2.0

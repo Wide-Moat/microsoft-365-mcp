@@ -343,7 +343,7 @@ async def test_download_issues_a_quoted_curl_with_a_drive_link(graph, invoke, rt
         0
     )  # the text holds the one copy
     assert "$(" not in cmd.split("'")[1] and "'" not in cmd.split("'")[1]
-    link = rt.signer.verify(link_of(r.text, "d"), op="d")
+    link = await rt.signer.verify(link_of(r.text, "d"), op="d")
     assert link.kind == "drive" and link.target == {"i": "f1", "n": "it's $(rm -rf x) q3.docx"}
     assert r.data["expires_in_seconds"] == 300 and graph.writes() == []
 
@@ -352,7 +352,7 @@ async def test_download_in_another_drive_and_as_pdf(graph, invoke, rt):
     graph.on("GET", "/drives/b!site/items/f2", drive_item("f2", "deck.pptx"))
     r = await invoke("download_file", id="f2", drive="b!site", format="pdf")
     assert not r.error, r.text
-    link = rt.signer.verify(link_of(r.text, "d"), op="d")
+    link = await rt.signer.verify(link_of(r.text, "d"), op="d")
     assert link.target == {"i": "f2", "d": "b!site", "f": "pdf", "n": "deck.pdf"}
     assert "'deck.pdf'" in r.text
 
@@ -383,7 +383,7 @@ async def test_upload_resolves_the_folder_and_returns_a_link(graph, invoke, rt):
     graph.on("GET", "/me/drive/root:/Reports/2026", {"id": "P1", "name": "2026", "folder": {}})
     r = await invoke("upload_file", folder="Reports/2026", name="q3.xlsx", on_conflict="replace")
     assert not r.error, r.text
-    link = rt.signer.verify(link_of(r.text, "u"), op="u")
+    link = await rt.signer.verify(link_of(r.text, "u"), op="u")
     assert link.kind == "drive_upload" and link.target == {"p": "P1", "n": "q3.xlsx", "c": "replace"}
     assert link.max_bytes == 250 * 1024 * 1024
     assert "curl -sS --fail-with-body -T '<path of the local file>' '" in r.text and graph.writes() == []
@@ -393,7 +393,7 @@ async def test_upload_to_the_top_level_of_a_site_library(graph, invoke, rt):
     graph.on("GET", "/drives/b!site/root", {"id": "R1", "folder": {}})
     r = await invoke("upload_file", folder="", name="a.txt", drive="b!site")
     assert not r.error, r.text
-    assert rt.signer.verify(link_of(r.text, "u"), op="u").target == {
+    assert (await rt.signer.verify(link_of(r.text, "u"), op="u")).target == {
         "p": "R1",
         "n": "a.txt",
         "c": "fail",
@@ -732,11 +732,11 @@ async def test_revoke_needs_no_confirmation(graph, invoke):
 
 
 async def test_a_link_issued_for_a_download_cannot_upload(rt):
-    s = rt.signer.issue(
+    s = await rt.signer.issue(
         op="d", kind="drive", target={"i": "x"}, person="p", token="t", token_expires=2_000_000_000, ttl=300
     )
     with pytest.raises(LinkRefused):
-        rt.signer.verify(s, op="u")
+        (await rt.signer.verify(s, op="u"))
 
 
 # -- what QA on a real tenant found ---------------------------------------------------------
@@ -1394,3 +1394,16 @@ async def test_kind_document_leaves_out_plain_text(graph, invoke):
     from m365_mcp.tools.files import _KIND_BY_EXT
 
     assert "txt" not in _KIND_BY_EXT["document"] and "docx" in _KIND_BY_EXT["document"]
+
+
+async def test_no_link_is_made_while_the_shared_store_is_down(graph, invoke, rt):
+    from helpers import DownStore
+
+    from m365_mcp.links.store import LinkStore
+    from m365_mcp.links.tokens import LinkSigner
+
+    rt.signer = LinkSigner((b"s" * 32,), (b"e" * 32,), LinkStore(DownStore()))
+    graph.on("GET", "/me/drive/root", {"id": "R1", "folder": {}})
+    r = await invoke("upload_file", folder="", name="a.txt")
+    assert r.error and "cannot reach the store its replicas share" in r.text and "No link was made." in r.text
+    assert "/u/" not in r.text

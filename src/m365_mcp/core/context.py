@@ -25,6 +25,7 @@ from m365_mcp.graph.errors import GraphError, to_person_error
 from m365_mcp.identity import Person, current_person
 from m365_mcp.links.store import LinksFull
 from m365_mcp.links.tokens import LinkSigner
+from m365_mcp.state.store import StoreUnavailable
 
 
 @dataclass
@@ -96,8 +97,8 @@ class Call:
             if not scope_granted(s, self.person.scopes):
                 raise M365Error("missing_permission", permission=s)
 
-    def guard(self, **kw: Any) -> dict:
-        return self.rt.guard.check(self.key, allowed_domains=self.rt.settings.allowed_recipient_domains, **kw)
+    async def guard(self, **kw: Any) -> dict:
+        return await self.rt.guard.check(self.key, allowed_domains=self.rt.settings.allowed_recipient_domains, **kw)
 
     def cursor_out(self, state: dict | None) -> str | None:
         return self.rt.cursors.make(self.tool, self.key, state) if state else None
@@ -105,7 +106,7 @@ class Call:
     def cursor_in(self, cursor: str | None) -> dict | None:
         return self.rt.cursors.read(self.tool, self.key, cursor) if cursor else None
 
-    def link(
+    async def link(
         self,
         *,
         op: str,
@@ -119,7 +120,7 @@ class Call:
             raise M365Error("links_unavailable")
         ttl = LINK_TTL_DOWNLOAD if op == "d" else LINK_TTL_UPLOAD
         try:
-            value = signer.issue(
+            value = await signer.issue(
                 op=op,
                 kind=kind,
                 target=target,
@@ -132,6 +133,8 @@ class Call:
             )
         except LinksFull:
             raise M365Error("links_full") from None
+        except StoreUnavailable:
+            raise M365Error("state_unavailable", outcome="No link was made.") from None
         return f"{self.rt.settings.links_base_url}/{op}/{value}"
 
 

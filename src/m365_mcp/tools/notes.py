@@ -33,7 +33,7 @@ def _attr(tag: str, name: str) -> str | None:
     return unescape(m.group(1)) if m else None
 
 
-def _resources(html: str, c: Call) -> list[dict[str, Any]]:
+async def _resources(html: str, c: Call) -> list[dict[str, Any]]:
     out, seen = [], set()
     for i, tag in enumerate(_TAG.findall(html), 1):
         # The full-resolution copy is preferred over the page-sized one.
@@ -48,7 +48,7 @@ def _resources(html: str, c: Call) -> list[dict[str, Any]]:
         if not name:
             kind = "image"
             name = f"image-{i}" + _EXT.get(_attr(tag, "data-src-type") or "", "")
-        url = c.link(op="d", kind="note_resource", target={"r": m.group(1), "n": name})
+        url = await c.link(op="d", kind="note_resource", target={"r": m.group(1), "n": name})
         out.append(
             {"name": name, "kind": kind, "download": f"curl -sS --fail-with-body -o {_shell_name(name)} '{url}'"}
         )
@@ -200,7 +200,7 @@ async def get_note_page(
                 "title": title,
                 "text": content_block("OneNote page", text),
                 **cut,
-                "resources": _resources(html, c),
+                "resources": await _resources(html, c),
             }
         )
 
@@ -259,7 +259,9 @@ async def save_note_page(
         sec = await _section(c, section, notebook) if section else None
         if body_upload:
             target = {"s": sec["id"], "title": title or "Untitled"} if action == "create" else {"page": id, "a": action}
-            url = c.link(op="u", kind="note_body", target=target, max_bytes=MAX_NOTE_UPLOAD, content_type="text/html")
+            url = await c.link(
+                op="u", kind="note_body", target=target, max_bytes=MAX_NOTE_UPLOAD, content_type="text/html"
+            )
             # The field is the command and nothing else, so it runs as issued.
             return {
                 "body_upload": f"curl -sS --fail-with-body -T page.html -H 'Content-Type: text/html; charset=utf-8' '{url}'",

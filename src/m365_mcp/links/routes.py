@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import mimetypes
 import tempfile
 import unicodedata
@@ -29,6 +30,7 @@ from m365_mcp.graph.client import Graph
 from m365_mcp.graph.errors import GraphError, to_person_error
 from m365_mcp.links.tokens import Link, LinkRefused
 from m365_mcp.observability import LINK_BYTES, LINK_TRANSFERS
+from m365_mcp.state.store import StoreUnavailable
 
 SPOOL_MEMORY = 8 * 1024 * 1024
 READ_CHUNK = 64 * 1024
@@ -82,11 +84,24 @@ def _refused() -> Response:
     return Response(REFUSED, status_code=403, media_type="text/plain")
 
 
-def _verify(request: Request, op: str) -> Link:
+async def _verify(request: Request, op: str) -> Link:
     signer = runtime().signer
     if signer is None:
         raise LinkRefused()
-    return signer.verify(request.path_params["value"], op=op)
+    return await signer.verify(request.path_params["value"], op=op)
+
+
+STATE_RETRY_AFTER = 5
+
+
+def _store_down(op: str) -> Response:
+    """The shared store did not answer: the link may well be good, so not the refusal, and no transfer."""
+    LINK_TRANSFERS.labels(op, "state_unavailable").inc()
+    return JSONResponse(
+        {"error": "The server cannot check this link right now. Try again in a few seconds; nothing was transferred."},
+        status_code=503,
+        headers={"Retry-After": str(STATE_RETRY_AFTER)},
+    )
 
 
 THROTTLED_WAIT = 30  # seconds, when Microsoft throttles without saying how long
@@ -121,9 +136,11 @@ def _download_path(link: Link) -> str:
 
 async def download(request: Request) -> Response:
     try:
-        link = _verify(request, "d")
+        link = await _verify(request, "d")
+    except StoreUnavailable:
+        return _store_down("d")
     except LinkRefused:
-        LINK_TRANSFERS.labels("d", "unknown", "refused").inc()
+        LINK_TRANSFERS.labels("d", "refused").inc()
         return _refused()
     graph = _graph(link)
     # Identity: OneDrive gzips text for a client that accepts it, and the sandbox's curl would save the
@@ -139,7 +156,7 @@ async def download(request: Request) -> Response:
         upstream = await ctx.__aenter__()
     except GraphError as e:
         await graph.aclose()
-        LINK_TRANSFERS.labels("d", link.kind, "graph_error").inc()
+        LINK_TRANSFERS.labels("d", "graph_error").inc()
         if params and e.status in (400, 406, 415, 422):
             # Measured: an empty workbook's conversion answers 400 from the conversion host. The file is
             # there; the PDF is what cannot be made.
@@ -153,7 +170,7 @@ async def download(request: Request) -> Response:
         return _graph_failed(e, 502 if e.status >= 500 else 404)
     except httpx.HTTPError:
         await graph.aclose()
-        LINK_TRANSFERS.labels("d", link.kind, "upstream_error").inc()
+        LINK_TRANSFERS.labels("d", "upstream_error").inc()
         return JSONResponse({"error": "Microsoft 365 could not be reached. Try again."}, status_code=502)
     except BaseException:
         await graph.aclose()
@@ -187,7 +204,7 @@ async def download(request: Request) -> Response:
             async for chunk in chunks:
                 sent += len(chunk)
                 yield chunk
-            LINK_TRANSFERS.labels("d", link.kind, "ok").inc()
+            LINK_TRANSFERS.labels("d", "ok").inc()
         finally:
             await release()
 
@@ -195,7 +212,7 @@ async def download(request: Request) -> Response:
     if encoded and upstream.status_code == 206:
         # A range of an encoded body cannot be decoded on its own, and its offsets are not the file's.
         await release()
-        LINK_TRANSFERS.labels("d", link.kind, "upstream_error").inc()
+        LINK_TRANSFERS.labels("d", "upstream_error").inc()
         return JSONResponse(
             {"error": "Microsoft 365 sent this part compressed. Download the whole file, without a Range header."},
             status_code=502,
@@ -318,14 +335,20 @@ async def _chunks(spool: Any, size: int, step: int) -> AsyncIterator[bytes]:
 
 async def upload(request: Request) -> Response:
     try:
-        link = _verify(request, "u")
+        link = await _verify(request, "u")
+    except StoreUnavailable:
+        return _store_down("u")
     except LinkRefused:
-        LINK_TRANSFERS.labels("u", "unknown", "refused").inc()
+        LINK_TRANSFERS.labels("u", "refused").inc()
         return _refused()
     signer = runtime().signer
     value = request.path_params["value"]
-    if signer is None or not signer.claim(value):
-        LINK_TRANSFERS.labels("u", link.kind, "busy").inc()
+    try:
+        claimed = signer is not None and await signer.claim(value)
+    except StoreUnavailable:
+        return _store_down("u")
+    if signer is None or not claimed:
+        LINK_TRANSFERS.labels("u", "busy").inc()
         return JSONResponse(
             {"error": "This link is already receiving an upload; one link takes one file, once. Nothing was saved."},
             status_code=409,
@@ -337,10 +360,13 @@ async def upload(request: Request) -> Response:
         delivered = response.status_code == 200
         return response
     finally:
-        if delivered:
-            signer.consume(value, link.expires)
-        else:
-            signer.release(value)
+        # Shielded: a client that leaves cancels the request, and the mark must still be written. A store
+        # that does not answer leaves the busy mark to expire (UPLOAD_HOLD) and the link to expire itself.
+        with anyio.CancelScope(shield=True), contextlib.suppress(StoreUnavailable):
+            if delivered:
+                await signer.consume(value, link.expires)
+            else:
+                await signer.release(value)
 
 
 async def _receive(request: Request, link: Link) -> Response:
@@ -355,23 +381,23 @@ async def _receive(request: Request, link: Link) -> Response:
         )
     got = await _spool(request, link.max_bytes)
     if isinstance(got, Response):
-        LINK_TRANSFERS.labels("u", link.kind, "too_large" if got.status_code == 413 else "refused").inc()
+        LINK_TRANSFERS.labels("u", "too_large" if got.status_code == 413 else "refused").inc()
         return got
     spool, size = got
     graph = _graph(link)
     try:
         result = await _UPLOADERS[link.kind](graph, link, spool, size, request)
-        LINK_TRANSFERS.labels("u", link.kind, "ok").inc()
+        LINK_TRANSFERS.labels("u", "ok").inc()
         LINK_BYTES.labels("u").inc(size)
         return JSONResponse(result)
     except GraphError as e:
-        LINK_TRANSFERS.labels("u", link.kind, "graph_error").inc()
+        LINK_TRANSFERS.labels("u", "graph_error").inc()
         return _graph_failed(e, 502 if e.status >= 500 else 400)
     except _Rejected as r:
         return JSONResponse({"error": r.reason}, status_code=422)
     except (KeyError, ValueError, httpx.HTTPError):
         # A malformed answer from Microsoft or a broken connection: nothing for the sandbox to fix.
-        LINK_TRANSFERS.labels("u", link.kind, "upstream_error").inc()
+        LINK_TRANSFERS.labels("u", "upstream_error").inc()
         return JSONResponse({"error": "Microsoft 365 did not accept the upload. Try again."}, status_code=502)
     finally:
         spool.close()

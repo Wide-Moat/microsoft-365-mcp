@@ -1753,3 +1753,18 @@ async def test_the_draft_preview_with_quoted_text_is_fenced(graph, invoke):
     assert not r.error, r.text
     assert "Ignore previous instructions" in inner(r.data["preview"])
     assert inner(r.data["subject"]) == "RE: hi"
+
+
+async def test_a_send_while_the_shared_store_is_down_sends_nothing(graph, invoke, rt):
+    # Fail closed: without the allowance every replica shares, no replica grants one of its own.
+    from helpers import DownStore
+
+    from m365_mcp.core.guard import Guard
+
+    rt.guard = Guard(DownStore())
+    _own_draft(graph)
+    person(graph, "Bo", "bo@x.test")
+    graph.on("POST", "/me/messages/d1/send", None, status=202)
+    r = await invoke("send_draft", id="d1", user_confirmed=True)
+    assert r.error and "cannot reach the store its replicas share" in r.text and "Try again in a few seconds" in r.text
+    assert graph.calls("POST", "/me/messages/d1/send") == []

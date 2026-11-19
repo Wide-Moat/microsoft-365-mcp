@@ -85,6 +85,10 @@ MESSAGES: dict[str, str] = {
     "system_folder": "{name} is a system folder and is not changed.",
     "links_unavailable": "File transfer is not configured on this server, so files cannot be moved.",
     "links_full": "Too many file links are open on this server right now. Try again in a few minutes.",
+    "state_unavailable": (
+        "The server cannot reach the store its replicas share, so it does nothing that needs it "
+        "right now. Try again in a few seconds. {outcome}"
+    ),
     "unsupported": "{reason}",
     "unexpected": "Something went wrong on our side; check whether the change happened before trying again. Reference: {request_id}.",
 }
@@ -108,6 +112,8 @@ def _sentence_params(key: str, params: dict[str, Any]) -> dict[str, Any]:
         out["names"] = f" (it goes to: {out['names']})" if out.get("names") else ""
     if key == "rate":
         out.setdefault("then", "Nothing was sent.")
+    if key == "state_unavailable":
+        out.setdefault("outcome", "Nothing was sent.")
     if key == "unresolved":
         out["where"] = WHERE.get(str(out.get("kind")), "Check the spelling, or list them to see the names.")
     return out

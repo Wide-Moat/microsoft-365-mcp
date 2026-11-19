@@ -404,7 +404,7 @@ async def save_task(
         if assignees is not None:
             wanted, others = await _assignments(c, assignees, me)
             if others:  # a Planner assignment tells the assignee; nothing is written before this
-                receipt = c.guard(
+                receipt = await c.guard(
                     kind="assignment",
                     user_confirmed=user_confirmed,
                     recipients=len(others),

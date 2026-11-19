@@ -1,6 +1,6 @@
 [project]
 name = "m365-mcp"
-version = "0.1.0"
+version = "0.2.0"
 license = "Apache-2.0"
 description = "MCP server for one person's Microsoft 365 through Microsoft Graph"
 requires-python = ">=3.12"
@@ -13,6 +13,7 @@ dependencies = [
   "cryptography>=50.0.2",
   "uvicorn==0.54.0",
   "prometheus-client>=0.26.0",
+  "redis==8.1.0",
 ]
 
 [project.optional-dependencies]
