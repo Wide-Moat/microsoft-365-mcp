@@ -9,7 +9,7 @@ from collections.abc import Callable
 from m365_mcp.core.errors import M365Error
 from m365_mcp.observability import GUARD_REFUSALS
 from m365_mcp.state.memory import MemoryStore
-from m365_mcp.state.store import StateStore, StoreUnavailable
+from m365_mcp.state.store import Namer, StateStore, StoreUnavailable
 
 MAX_RECIPIENTS = 20
 CAPACITY = 10
@@ -40,12 +40,23 @@ class Guard:
     """The checks, then one token from the person's bucket in the shared store: every replica draws from the
     same allowance. A store that does not answer refuses the send rather than grant an allowance of its own."""
 
-    def __init__(self, store: StateStore | None = None, *, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        store: StateStore | None = None,
+        *,
+        clock: Callable[[], float] = time.time,
+        previous: tuple[Namer, ...] = (),
+    ) -> None:
         self.store: StateStore = store if store is not None else MemoryStore(clock=clock)
+        # The store names under the key file's later lines: during a rotation pods hold the keys in either
+        # order, and each send draws from the person's bucket under every key, so all pods share one.
+        self._previous = previous
 
     async def _take(self, person: str, kind: str = "") -> int:
         try:
-            taken, tokens = await self.store.take(person, capacity=CAPACITY, refill_per_second=REFILL_PER_SECOND)
+            taken, tokens = await self.store.take(
+                person, capacity=CAPACITY, refill_per_second=REFILL_PER_SECOND, also=self._previous
+            )
         except StoreUnavailable:
             GUARD_REFUSALS.labels("state_unavailable").inc()
             raise M365Error("state_unavailable", outcome=_RATE_THEN.get(kind, "Nothing was sent.")) from None

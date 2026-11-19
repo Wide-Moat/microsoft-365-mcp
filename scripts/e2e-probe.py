@@ -8,7 +8,12 @@ the server process does for a tool call, without a Microsoft 365 sign-in. Each c
     claim <id>           start an upload on a link, as the links route does; prints True or False
     guard <person> <n>   draw n sends from a person's allowance; prints each outcome (ok, rate, state_unavailable)
     get <url>            GET a URL; prints the status and the start of the body
+    body <url>           GET a URL; prints the whole body (a metrics page)
     put <url>            PUT a small body to a URL; prints the status and the start of the body
+
+A URL that does not answer prints `ERR <reason>`: that is an observation (an old image has no metrics
+port). Anything else that goes wrong is an exception and a non-zero exit, which the caller treats as the
+check itself being broken.
 
 It also runs against an image from before the shared store (0.1.x), to show the checks fail there: that
 code keeps its links and its allowance in the memory of the process that made them.
@@ -56,7 +61,7 @@ async def maybe(value):
     return await value if asyncio.iscoroutine(value) else value
 
 
-def http(method: str, url: str) -> str:
+def http(method: str, url: str, whole: bool = False) -> str:
     req = urllib.request.Request(
         url,
         method=method,
@@ -65,14 +70,16 @@ def http(method: str, url: str) -> str:
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
-            return f"{r.status} {r.read(200)!r}"
+            return r.read().decode() if whole else f"{r.status} {r.read(200)!r}"
     except urllib.error.HTTPError as e:
         return f"{e.code} {e.read(200)!r}"
+    except (urllib.error.URLError, OSError) as e:
+        return f"ERR {type(getattr(e, 'reason', e)).__name__}"
 
 
 async def main(args: list[str]) -> None:
-    if args[0] in ("get", "put"):
-        print(http(args[0].upper(), args[1]))
+    if args[0] in ("get", "put", "body"):
+        print(http("PUT" if args[0] == "put" else "GET", args[1], whole=args[0] == "body"))
         return
     settings, signer, guard, store = await runtime()
     try:

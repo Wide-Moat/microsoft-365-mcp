@@ -78,12 +78,13 @@ exec redis-sentinel /tmp/s.conf"
 
 # Ready: the replica is in sync and every Sentinel knows the master and the other two.
 for _ in $(seq 1 60); do
-  link=$(docker exec "$r" valkey-cli -a "$pw" --no-auth-warning info replication | tr -d '\r' \
-    | sed -n 's/^master_link_status://p')
+  # A server or sentinel not listening yet is "not ready", never a reason to stop: `|| true` in each probe.
+  link=$(docker exec "$r" valkey-cli -a "$pw" --no-auth-warning info replication 2>/dev/null | tr -d '\r' \
+    | sed -n 's/^master_link_status://p' || true)
   known=0
   for i in 1 2 3; do
     n=$(docker exec "$net-sentinel-$i" valkey-cli -p 26379 -a "$spw" --no-auth-warning \
-      sentinel master mymaster 2>/dev/null | tr -d '\r' | awk 'p{print; exit} /^num-other-sentinels$/{p=1}')
+      sentinel master mymaster 2>/dev/null | tr -d '\r' | awk 'p{print; exit} /^num-other-sentinels$/{p=1}' || true)
     [ "${n:-0}" = 2 ] && known=$((known + 1))
   done
   [ "$link" = up ] && [ "$known" = 3 ] && break
@@ -91,8 +92,10 @@ for _ in $(seq 1 60); do
 done
 [ "$link" = up ] && [ "$known" = 3 ] || { echo "the Sentinel set did not come up (link=$link, sentinels=$known)"; exit 1; }
 for _ in $(seq 1 60); do
-  rlink=$(docker exec "$rr" redis-cli info replication | tr -d '\r' | sed -n 's/^master_link_status://p')
-  rmaster=$(docker exec "$rs" redis-cli -p 26379 sentinel get-master-addr-by-name mymaster 2>/dev/null | head -1 | tr -d '\r')
+  rlink=$(docker exec "$rr" redis-cli info replication 2>/dev/null | tr -d '\r' \
+    | sed -n 's/^master_link_status://p' || true)
+  rmaster=$(docker exec "$rs" redis-cli -p 26379 sentinel get-master-addr-by-name mymaster 2>/dev/null \
+    | head -1 | tr -d '\r' || true)
   [ "$rlink" = up ] && [ -n "$rmaster" ] && break
   sleep 1
 done

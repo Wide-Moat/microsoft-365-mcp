@@ -55,9 +55,12 @@ class StateStore(Protocol):
 
     async def ping(self) -> None: ...
 
-    async def take(self, person: str, *, capacity: float, refill_per_second: float) -> tuple[bool, float]:
-        """Take one token from the person's bucket. Returns whether it was taken and the tokens left after
-        (when refused, the tokens there are, below one)."""
+    async def take(
+        self, person: str, *, capacity: float, refill_per_second: float, also: tuple[Namer, ...] = ()
+    ) -> tuple[bool, float]:
+        """Take one token from the person's bucket, and from their bucket under each namer in `also` (the
+        previous keys during a rotation): from all or from none. Returns whether it was taken and the
+        tokens left after (when refused, the fewest there are, below one)."""
         ...
 
     async def link_put(

@@ -38,7 +38,8 @@ class MemoryStore:
         self._clock = clock
         self._buckets: dict[str, _Bucket] = {}
         self._links: dict[str, _Link] = {}
-        self._busy: dict[str, float] = {}
+        # link name -> (held until, the tag it was issued under)
+        self._busy: dict[str, tuple[float, str]] = {}
         self._spent: dict[str, float] = {}
         # Threads, not tasks: a test client serves the app in a thread of its own while the test calls in.
         self._lock = threading.Lock()
@@ -61,34 +62,40 @@ class MemoryStore:
 
         await measured("ping", op, ())
 
-    async def take(self, person: str, *, capacity: float, refill_per_second: float) -> tuple[bool, float]:
+    async def take(
+        self, person: str, *, capacity: float, refill_per_second: float, also: tuple[Namer, ...] = ()
+    ) -> tuple[bool, float]:
         async def op() -> tuple[bool, float]:
             now = self._clock()
-            key = self._name("bucket", person)
+            keys = [self._name("bucket", person)] + [n("bucket", person) for n in also]
             with self._lock:
                 # A bucket full again is the same as none: forget it, so the process does not keep every
                 # person it ever saw. Each bucket knows when it is full under its own rate and capacity; a
                 # bucket still refilling is kept, or forgetting it would refill it.
                 for k in [k for k, v in self._buckets.items() if v.full_at <= now]:
                     del self._buckets[k]
-                b = self._buckets.get(key)
-                if b is None:
-                    b = self._buckets[key] = _Bucket(capacity, now)
-                b.tokens = min(capacity, b.tokens + max(0.0, now - b.at) * refill_per_second)
-                b.at = now
-                if b.tokens < 1:
+                buckets = []
+                for key in keys:
+                    b = self._buckets.get(key)
+                    if b is None:
+                        b = self._buckets[key] = _Bucket(capacity, now)
+                    b.tokens = min(capacity, b.tokens + max(0.0, now - b.at) * refill_per_second)
+                    b.at = now
+                    buckets.append(b)
+                # From every bucket of the person (one per key during a rotation) or from none.
+                fewest = min(b.tokens for b in buckets)
+                taken = fewest >= 1
+                for b in buckets:
+                    b.tokens -= 1 if taken else 0
                     b.full_at = now + (capacity - b.tokens) / refill_per_second
-                    return False, b.tokens
-                b.tokens -= 1
-                b.full_at = now + (capacity - b.tokens) / refill_per_second
-                return True, b.tokens
+                return taken, fewest - (1 if taken else 0)
 
         return await measured("take", op, ())
 
     def _prune(self, now: float) -> None:
         for k in [k for k, v in self._links.items() if v.expires <= now]:
             del self._links[k]
-        for k in [k for k, exp in self._busy.items() if exp <= now]:
+        for k in [k for k, (exp, _tag) in self._busy.items() if exp <= now]:
             del self._busy[k]
         for k in [k for k, exp in self._spent.items() if exp <= now]:
             del self._spent[k]
@@ -135,7 +142,8 @@ class MemoryStore:
                 self._prune(now)
                 if key in self._busy or key in self._spent:
                     return False
-                self._busy[key] = now + hold
+                held = self._links.get(key)
+                self._busy[key] = (now + hold, held.tag if held is not None else "")
                 return True
 
         return await measured("link_claim", op, ())
@@ -175,7 +183,8 @@ class MemoryStore:
             group = self._name("tag", tag)
             with self._lock:
                 self._prune(now)
-                return any(k in self._busy for k, v in self._links.items() if v.tag == group)
+                # The claim carries its tag: an upload admitted just before its link expired still runs.
+                return any(t == group for _until, t in self._busy.values())
 
         return await measured("link_busy_under", op, ())
 
@@ -191,6 +200,9 @@ class MemoryStore:
                 for k in keys:
                     self._spent[k] = self._links.pop(k).expires
                     self._busy.pop(k, None)
+                # An upload still running past its link's expiry is spent too.
+                for k in [k for k, (_until, t) in self._busy.items() if t == group]:
+                    self._spent[k] = self._busy.pop(k)[0]
                 return len(keys)
 
         return await measured("link_revoke", op, ())

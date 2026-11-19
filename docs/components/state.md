@@ -8,7 +8,7 @@ What replicas must agree on, where it lives, and what happens when it is gone.
 |---|---|---|
 | Each person's send allowance | token bucket, ten at once, one per six seconds; one Lua script | until full again (about a minute) |
 | A short link's id → its sealed value | stored with its expiry; at most 300 per person and 5,000 in all, checked in the same script | the link's life: 300 s down, 180 s up |
-| An upload running on a link | busy mark, `SET NX` with a deadline (1,200 s), so a dead replica frees it | the upload |
+| An upload running on a link | busy mark, `SET NX` with a deadline (1,200 s), so a dead replica frees it; entered under the link's draft for as long as it holds, past the link's own expiry | the upload |
 | A link that delivered | spent mark | the link's life |
 | The links that write into one draft | a set, revoked together when the draft is sent | the links' life |
 
@@ -91,5 +91,6 @@ issues:
 | 2 | `--promote` | new, old | new pods issue under the new key; pods of phase 1 already open it |
 | 3 | `--drop-previous`, after the old key's links expired (minutes) | new | nothing issues under the old key any more |
 
-Allowances are counted under the issuing key: phase 2 gives everyone a full bucket once. After a leak,
-run the three at once: links issued in between are refused, and the old key is gone.
+A send draws from the person's bucket under every key the pod holds, all or none, so pods holding the
+file in either order share one allowance through every phase. After a leak, run the three at once:
+links issued in between are refused, and the old key is gone.

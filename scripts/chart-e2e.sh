@@ -69,6 +69,10 @@ serving() {  # the server pods that run and are not on their way out, oldest fir
   k get pod -l app.kubernetes.io/instance="$rel" -o json | jq -r '[.items[] | select(.status.phase == "Running"
     and .metadata.deletionTimestamp == null)] | sort_by(.metadata.creationTimestamp) | .[].metadata.name'
 }
+# The old image runs patched (patch_old), and the next helm upgrade must take those fields back: on the
+# known-bad run only, helm overrides the patch's field ownership instead of stopping on it.
+force=""
+[ "$bad" = 1 ] && force="--force-conflicts"
 patch_old() {
   k patch deployment "$full" --type json -p '[
     {"op":"remove","path":"/spec/template/spec/initContainers"},
@@ -91,14 +95,39 @@ ip() { k get pod "$1" -o jsonpath='{.status.podIP}'; }
 A=${pods[0]} B=${pods[1]} C=${pods[2]}
 IPA=$(ip "$A") IPB=$(ip "$B") IPC=$(ip "$C")
 echo "pods: A=$A ($IPA) B=$B ($IPB) C=$C ($IPC)"
-probe() { local p=$1; shift; timeout 90 kubectl -n "$ns" exec -i "$p" -c server -- python - "$@" <scripts/e2e-probe.py 2>&1 | tail -1; }
+broken="$(mktemp -d)"
+trap 'rm -rf "$broken"' EXIT
+probe() {  # run scripts/e2e-probe.py in a server container; a probe that cannot run breaks the whole run
+  local p=$1 out rc
+  shift
+  out=$(timeout 90 kubectl -n "$ns" exec -i "$p" -c server -- python - "$@" <scripts/e2e-probe.py 2>&1)
+  rc=$?
+  if [ "$rc" != 0 ]; then
+    echo "probe $* on $p exited $rc: $(tail -2 <<<"$out")" >>"$broken/errors"
+  fi
+  tail -1 <<<"$out"
+}
 resolved() {  # a link one replica found and verified: Graph's refusal of the forged token, never 403
   case "$1" in 404*Reconnect*|502*reached*) return 0;; *) return 1;; esac
 }
 restarts() { k get pod "$1" -o jsonpath='{.status.containerStatuses[0].restartCount}'; }
 metrics() {  # the metrics page of the pod at $1, fetched from inside the cluster
-  timeout 30 kubectl -n "$ns" exec "$C" -c server -- python -c \
-    "import urllib.request;print(urllib.request.urlopen('http://$1:9090/metrics',timeout=5).read().decode())" 2>&1
+  local out rc
+  out=$(timeout 90 kubectl -n "$ns" exec -i "$C" -c server -- python - body "http://$1:9090/metrics" \
+    <scripts/e2e-probe.py 2>&1)
+  rc=$?
+  [ "$rc" = 0 ] || echo "metrics of $1 exited $rc: $(tail -2 <<<"$out")" >>"$broken/errors"
+  echo "$out"
+}
+collect_logs() {  # every container's log of every pod now running, kept before a rollout replaces the pod
+  local p c
+  mkdir -p "$broken/logs"
+  for p in $(k get pod -l app.kubernetes.io/instance="$rel" -o jsonpath='{.items[*].metadata.name}'); do
+    for c in stage-keys server; do
+      k logs "$p" -c "$c" >"$broken/logs/$p.$c" 2>/dev/null || true
+      k logs "$p" -c "$c" --previous >"$broken/logs/$p.$c.previous" 2>/dev/null || true
+    done
+  done
 }
 
 na "1 an authorization code redeemed on one pod: this server issues none (the gateway signs people in)"
@@ -141,7 +170,9 @@ else
 fi
 material=$(k get secret "$secret" -o json | jq -r '.data.key' | base64 -d | head -1 | cut -d: -f2)
 envs=$(timeout 60 kubectl -n "$ns" exec "$A" -c server -- env 2>&1)
-if [ -n "$envs" ] && [ "${#material}" = 43 ] && ! grep -qF "$material" <<<"$envs" && ! grep -q "M365_LINK_SECRET\|$pw" <<<"$envs"; then
+env_rc=$?
+if [ "$env_rc" = 0 ] && grep -q '^M365_KEY_FILE=' <<<"$envs" && [ "${#material}" = 43 ] \
+  && ! grep -qF -e "$material" -e "$pw" -e "$spw" <<<"$envs" && ! grep -q "M365_LINK_SECRET" <<<"$envs"; then
   pass "k2 no key and no store password in the environment a shell gets"
 else
   fail "k2 a key or a password is in the server container's environment (or the probe saw nothing)"
@@ -157,18 +188,17 @@ if [ "$got" = "READ DENIED DENIED" ]; then pass "k4 a shell of the server's user
 else fail "k4 own environ, PID 1 environ, PID 1 maps: $got"; fi
 
 # -- 5. the master dies: fail closed, then Sentinel fails over --------------------------------------
+collect_logs
 before=$(for p in "${pods[@]}"; do restarts "$p"; done | tr '\n' ' ')
+# A sampler reads pod B's mcp_state_store_up twice a second from before the kill to the recovery, so
+# the outage is seen however short Sentinel makes it.
+( while :; do metrics "$IPB" | grep '^mcp_state_store_up' >>"$broken/store_up"; sleep 0.5; done ) &
+sampler=$!
 t0=$(date +%s)
-k delete pod valkey-a --wait=false >/dev/null
+k delete pod valkey-a --wait=true --timeout=60s >/dev/null || die "the master did not die"
 during=$(probe "$A" guard e2e-outage 1)
 ready_during=$(for p in "${pods[@]}"; do k get pod "$p" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'; done)
 readyz=$(probe "$C" get "http://$IPA:9090/readyz")
-down_seen=no
-for _ in $(seq 1 10); do
-  m=$(metrics "$IPB" | grep '^mcp_state_store_up')
-  case "$m" in *" 0.0") down_seen=yes; break;; esac
-  sleep 1
-done
 back=""
 while [ $(( $(date +%s) - t0 )) -le 30 ]; do
   back=$(probe "$B" guard e2e-after 1)
@@ -176,6 +206,10 @@ while [ $(( $(date +%s) - t0 )) -le 30 ]; do
   sleep 1
 done
 took=$(( $(date +%s) - t0 ))
+sleep 6  # the store watch pings every 5 s: let the sampler see the store back
+kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null
+down_seen=no
+grep -q ' 0.0$' "$broken/store_up" 2>/dev/null && grep -q ' 1.0$' "$broken/store_up" && down_seen=yes
 master_after=$(sentinel sentinel get-master-addr-by-name mymaster | head -1)
 after=$(for p in "${pods[@]}"; do restarts "$p"; done | tr '\n' ' ')
 if [ "$during" = state_unavailable ]; then pass "5a with the master gone a send fails closed (state_unavailable)"
@@ -185,8 +219,8 @@ if [ "$ready_during" = "TrueTrueTrue" ] && [ "${readyz%% *}" = 200 ] && [ "$befo
 else
   fail "5b ready '$ready_during', readyz '${readyz:0:60}', restarts before '$before' after '$after'"
 fi
-if [ "$down_seen" = yes ]; then pass "5c mcp_state_store_up went to 0 during the outage"
-else fail "5c mcp_state_store_up never showed 0 during the outage"; fi
+if [ "$down_seen" = yes ]; then pass "5c mcp_state_store_up went to 0 during the outage and back to 1"
+else fail "5c mcp_state_store_up samples: $(sort "$broken/store_up" 2>/dev/null | uniq -c | tr '\n' ' ')"; fi
 # Recovery means something: the same sends failed closed a moment before (5a).
 if [ "$during" = state_unavailable ] && [ "$back" = ok ] && [ "$took" -le 30 ] && [ "$master_after" != "$master_before" ]; then
   pass "5d Sentinel promoted $master_after; sends work again ${took}s after the kill"
@@ -218,6 +252,7 @@ else fail "7 metrics"; fi
 
 # -- key lifetime: a container restart keeps it, a rotation keeps the previous one for the rollout ------
 id=$(probe "$A" link)
+collect_logs
 r0=$(restarts "$A")
 timeout 30 kubectl -n "$ns" exec "$A" -c server -- sh -c 'kill 1' >/dev/null 2>&1
 for _ in $(seq 1 60); do
@@ -232,7 +267,7 @@ else fail "k5 after a container restart: restarts $(restarts "$A") (was $r0), li
 # any other pod issues, so the middle rollout is paused with both kinds of pod running and checked both ways.
 redeploy() {  # $1 revision; $2 "wait" or "nowait"
   if [ "$bad" = 1 ]; then
-    timeout 300 helm upgrade "$rel" charts/microsoft-365-mcp -n "$ns" --reuse-values --set key.revision="$1" \
+    timeout 300 helm upgrade "$rel" charts/microsoft-365-mcp -n "$ns" --reuse-values $force --set key.revision="$1" \
       >/dev/null || die "helm upgrade"
     patch_old
   elif [ "$2" = wait ]; then
@@ -242,6 +277,7 @@ redeploy() {  # $1 revision; $2 "wait" or "nowait"
   fi
 }
 revision_of() { k get pod "$1" -o jsonpath='{.metadata.annotations.microsoft-365-mcp/key-revision}'; }
+collect_logs
 before_link=$(probe "$A" link)
 rev2=$(scripts/new-sealing-key.sh "$ns" "$secret") || die "rotation phase 1"
 redeploy "$rev2" wait
@@ -254,6 +290,10 @@ if [ "$(tr '_' '\n' <<<"$rev2" | wc -l | tr -d ' ')" = 2 ] && [ "${rev2%%_*}" = 
 else
   fail "k6 phase 1: revision '$rev2' (key 1 '$kid1'), link from before '$got'"
 fi
+collect_logs
+# The last link under the old key as the issuing one: phase 3 must refuse it while it is still unexpired.
+old_link=$(probe "$A" link)
+old_link_at=$(date +%s)
 rev3=$(scripts/new-sealing-key.sh --promote "$ns" "$secret") || die "rotation phase 2"
 # A new pod becomes available only after 40 s Ready, so old pods keep serving beside it: a window wide
 # enough to pause in, whatever the speed of the cluster. Helm leaves a field the chart never sets.
@@ -302,54 +342,37 @@ if [ "$mixed" = yes ] && resolved "$got_before" && resolved "$got_new"; then
 else
   fail "k7 phase 2: mixed pods '${mixed:-not both}', link from before '$got_before', new link '$got_new'"
 fi
+collect_logs
 rev4=$(scripts/new-sealing-key.sh --drop-previous "$ns" "$secret") || die "rotation phase 3"
 redeploy "$rev4" wait
 k rollout status deploy/"$full" --timeout=240s >/dev/null || die "rollout after phase 3"
 mapfile -t pods < <(serving)
 A=${pods[0]} B=${pods[1]}; IPB=$(ip "$B")
-got=$(probe "$A" get "http://$IPB:8001/d/$before_link")
+got=$(probe "$A" get "http://$IPB:8001/d/$old_link")
+age=$(( $(date +%s) - old_link_at ))
 fresh_got=$(probe "$A" get "http://$IPB:8001/d/$promoted_link")
-if [ "${got%% *}" = 403 ] && resolved "$fresh_got"; then
+if [ "$age" -ge 290 ]; then
+  fail "k8 inconclusive: the old key's link is ${age}s old, past its 300 s life, so a 403 proves nothing"
+elif [ "${got%% *}" = 403 ] && resolved "$fresh_got"; then
   pass "k8 phase 3 drops the old key: what it sealed is refused (403), the new key's links open"
 else
   fail "k8 phase 3: link under the dropped key '$got', under the new key '$fresh_got'"
 fi
 
 # -- 6. every line of every container, the init container too, is JSON ------------------------------
-total=0 bad_lines=0 init_lines=0
-for p in "${pods[@]}"; do
-  for c in stage-keys server; do
-    out=$(k logs "$p" -c "$c" 2>/dev/null)
-    prev=$(k logs "$p" -c "$c" --previous 2>/dev/null)
-    n=$(printf '%s\n%s\n' "$out" "$prev" | python3 -c '
-import json, sys
-good = bad = 0
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    try:
-        rec = json.loads(line)
-        ok = isinstance(rec, dict) and {"ts", "level", "logger", "event", "msg"} <= set(rec)
-    except ValueError:
-        ok = False
-    if ok:
-        good += 1
-    else:
-        bad += 1
-        print("NOT JSON:", line.rstrip()[:200], file=sys.stderr)
-print(good, bad)')
-    total=$((total + ${n% *})); bad_lines=$((bad_lines + ${n#* }))
-    [ "$c" = stage-keys ] && init_lines=$((init_lines + ${n% *}))
-  done
-done
-if [ "$bad_lines" = 0 ] && [ "$total" -gt 0 ] && [ "$init_lines" -ge "${#pods[@]}" ]; then
-  pass "6 all $total log lines of ${#pods[@]} pods are JSON, $init_lines of them from the init container"
+# Logs were kept before every restart and rollout (collect_logs), so the pods of the outage and of the
+# restart are read too, not only the last ones standing.
+collect_logs
+read -r total bad_lines init_lines files < <(python3 scripts/e2e-logs.py "$broken/logs")
+pods_seen=$(ls "$broken/logs" | sed 's/\..*//' | sort -u | wc -l | tr -d ' ')
+if [ "$bad_lines" = 0 ] && [ "$total" -gt 0 ] && [ "$init_lines" -ge "$pods_seen" ] && [ "$pods_seen" -gt 3 ]; then
+  pass "6 all $total log lines of $pods_seen pods ($files container logs) are JSON, $init_lines from the init container"
 else
-  fail "6 logs: $total JSON lines, $bad_lines not JSON, $init_lines from the init container"
+  fail "6 logs: $total JSON lines, $bad_lines not JSON, $init_lines from the init container, $pods_seen pods"
 fi
 
 # -- 8. the autoscaler renders and reads a CPU target -------------------------------------------------
-timeout 300 helm upgrade "$rel" charts/microsoft-365-mcp -n "$ns" --reuse-values --set autoscaling.enabled=true \
+timeout 300 helm upgrade "$rel" charts/microsoft-365-mcp -n "$ns" --reuse-values $force --set autoscaling.enabled=true \
   >/dev/null || die "helm upgrade with the autoscaler"
 [ "$bad" = 1 ] && patch_old
 cpu=""
@@ -362,6 +385,11 @@ if [ -n "$cpu" ]; then pass "8 the HorizontalPodAutoscaler reads CPU (${cpu}% of
 else fail "8 the HorizontalPodAutoscaler shows no CPU target: $(k get hpa 2>&1 | tail -1)"; fi
 
 # -- the count ------------------------------------------------------------------------------------
+if [ -s "$broken/errors" ]; then
+  echo "the checks themselves broke, so their results prove nothing:"
+  cat "$broken/errors"
+  exit 2
+fi
 passed=0 failed=0
 for r in "${results[@]}"; do case "$r" in PASS*) passed=$((passed + 1));; FAIL*) failed=$((failed + 1));; esac; done
 want=19

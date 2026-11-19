@@ -65,6 +65,10 @@ def make(kind: str, prefix: str) -> RedisStore:
 async def replicas(request) -> AsyncIterator[tuple]:
     """Two replicas' views of one store. In memory both are the one process's store."""
     kind = request.param
+    # One backend alone (scripts/mutation_check.py --stores runs every mutant against each in turn).
+    only = os.environ.get("M365_TEST_ONLY")
+    if only and kind != only:
+        pytest.skip(f"M365_TEST_ONLY={only}")
     if kind == "memory":
         m = MemoryStore(Namer(NAMER_KEY))
         yield m, m

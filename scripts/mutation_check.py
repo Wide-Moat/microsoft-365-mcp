@@ -601,7 +601,7 @@ MUTATIONS = [
     (
         "the memory store's bucket refuses past its capacity",
         "state/memory.py",
-        [("                if b.tokens < 1:\n", "                if False:\n")],
+        [("                taken = fewest >= 1\n", "                taken = True\n")],
         "tests/state/test_store_contract.py",
     ),
     (
@@ -706,9 +706,27 @@ MUTATIONS = [
         ],
         "tests/unit/test_graph_client.py",
     ),
+    (
+        "a send during a key rotation draws from every key's bucket",
+        "core/guard.py",
+        [("also=self._previous", "also=()")],
+        "tests/unit/test_core.py",
+    ),
+    (
+        "memory: an upload holds its draft past its link's expiry",
+        "state/memory.py",
+        [
+            (
+                'self._busy[key] = (now + hold, held.tag if held is not None else "")',
+                'self._busy[key] = (now + hold, "")',
+            )
+        ],
+        "tests/state/test_store_contract.py::test_an_upload_admitted_before_its_link_expired_still_holds_the_draft",
+    ),
 ]
 # Mutations of the Lua scripts: they need the real stores, so scripts/state-contract.sh runs them
 # (python scripts/mutation_check.py --stores) in the network where Redis, Valkey and the Sentinels are.
+STORE_BACKENDS = ("redis", "valkey", "sentinel", "redis-sentinel")
 STORE_MUTATIONS = [
     (
         "Redis: a full store refuses a script before its first write",
@@ -719,7 +737,7 @@ STORE_MUTATIONS = [
     (
         "Redis: a bucket refuses past its capacity",
         "state/remote.py",
-        [("if tokens >= 1 then tokens = tokens - 1 taken = 1 end", "tokens = tokens - 1 taken = 1")],
+        [("if fewest >= 1 then taken = 1 end", "taken = 1")],
         "tests/state/test_store_contract.py",
     ),
     (
@@ -727,8 +745,8 @@ STORE_MUTATIONS = [
         "state/remote.py",
         [
             (
-                "if redis.call('SET', KEYS[1], '1', 'NX', 'PX', ARGV[1]) then return 1 end",
-                "if redis.call('SET', KEYS[1], '1', 'PX', ARGV[1]) then return 1 end",
+                "if not redis.call('SET', KEYS[1], '1', 'NX', 'PX', ARGV[1]) then return 0 end",
+                "if not redis.call('SET', KEYS[1], '1', 'PX', ARGV[1]) then return 0 end",
             )
         ],
         "tests/state/test_store_contract.py",
@@ -736,8 +754,25 @@ STORE_MUTATIONS = [
     (
         "Redis: a spent link cannot be claimed again",
         "state/remote.py",
-        [("if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end\nif redis.call('SET'", "if redis.call('SET'")],
+        [
+            (
+                "if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end\nif not redis.call('SET'",
+                "if not redis.call('SET'",
+            )
+        ],
         "tests/state/test_store_contract.py",
+    ),
+    (
+        "Redis: an upload holds its draft past its link's expiry",
+        "state/remote.py",
+        [("  redis.call('ZADD', busy, now + tonumber(ARGV[1]) / 1000, ARGV[2]) keep(busy)\n", "")],
+        "tests/state/test_store_contract.py::test_an_upload_admitted_before_its_link_expired_still_holds_the_draft",
+    ),
+    (
+        "Redis: expired links do not pile up under a draft",
+        "state/remote.py",
+        [("  redis.call('ZREMRANGEBYSCORE', tag, '-inf', now)\n  redis.call('ZADD', tag", "  redis.call('ZADD', tag")],
+        "tests/state/test_store_contract.py::test_expired_links_do_not_pile_up_under_one_draft",
     ),
     (
         "Redis: one owner is capped",
@@ -805,7 +840,7 @@ def mutated(rel: str, edits: list[tuple[str, str]]) -> Iterator[None]:
         path.write_text(original)
 
 
-def run(*selectors: str) -> int:
+def run(*selectors: str, env: dict[str, str] | None = None) -> int:
     """pytest's exit code: 0 passed, 1 a test failed. Anything else (2 collection error, 4 usage, 5 no
     tests) is not evidence that a test caught the mutation, so it is reported as its own problem.
 
@@ -814,7 +849,7 @@ def run(*selectors: str) -> int:
     number of bytes within one second would otherwise run the previous mutant's bytecode, and a
     guard that is gone reads as caught, or one that is present as not caught."""
     with tempfile.TemporaryDirectory(prefix="mutation-pyc-") as cache:
-        env = {**os.environ, "PYTHONPYCACHEPREFIX": cache}
+        env = {**os.environ, **(env or {}), "PYTHONPYCACHEPREFIX": cache}
         return subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", *selectors],
             cwd=ROOT,
@@ -835,19 +870,24 @@ def main() -> int:
             "runs them with --stores"
         )
     failures = []
+    # A store mutant must be caught on every real server, each run alone: one backend failing first would
+    # otherwise hide whether the others notice.
+    backends = STORE_BACKENDS if stores else (None,)
     for what, rel, edits, selector in chosen:
-        try:
-            with mutated(rel, edits):
-                code = run(selector, *extra)
-        except GuardNotFound as e:
-            failures.append(f"{what}: {e}")
-            continue
-        status = {0: "NOT CAUGHT", 1: "caught"}.get(code, f"BROKEN({code})")
-        print(f"{status:10} {what}")
-        if code == 0:
-            failures.append(f"{what}: tests still pass with the guard removed")
-        elif code != 1:
-            failures.append(f"{what}: pytest exited {code}, which is not a failing test")
+        for backend in backends:
+            label = f"{what} [{backend}]" if backend else what
+            try:
+                with mutated(rel, edits):
+                    code = run(selector, *extra, env={"M365_TEST_ONLY": backend} if backend else None)
+            except GuardNotFound as e:
+                failures.append(f"{what}: {e}")
+                break
+            status = {0: "NOT CAUGHT", 1: "caught"}.get(code, f"BROKEN({code})")
+            print(f"{status:10} {label}")
+            if code == 0:
+                failures.append(f"{label}: tests still pass with the guard removed")
+            elif code != 1:
+                failures.append(f"{label}: pytest exited {code}, which is not a failing test")
     if run("tests/state/test_store_contract.py" if stores else "tests/unit/test_core.py", *extra) != 0:
         failures.append("the suite does not pass after restoring the code")
     print(f"\n{len(chosen)} mutations, {len(failures)} problems")

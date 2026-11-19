@@ -100,12 +100,19 @@ jobs:
           d = json.load(open(f"/tmp/scan-{arch}.json"))
           results = d.get("Results") or []
           os_pkgs = [p for r in results if r.get("Class") == "os-pkgs" for p in (r.get("Packages") or [])]
-          python = {p["Name"] for r in results if r.get("Type") == "python-pkg" for p in (r.get("Packages") or [])}
+          def norm(name):
+              return name.lower().replace("_", "-").replace(".", "-")
+          python = {norm(p["Name"]) for r in results if r.get("Type") == "python-pkg"
+                    for p in (r.get("Packages") or [])}
+          # Every locked dependency must be in the report: a scan that skipped one cannot vouch for it.
+          locked = {norm(line.split("==")[0]) for line in open("requirements.lock")
+                    if "==" in line and line[0].isalpha()}
+          missing = sorted(locked - python)
           vulns = [v for r in results for v in (r.get("Vulnerabilities") or [])]
           print(f"{arch}: {len(os_pkgs)} system packages, {len(python)} Python packages,",
                 f"{len(vulns)} fixable HIGH/CRITICAL")
-          if not os_pkgs or not {"cryptography", "redis", "mcp"} <= python:
-              print("trivy did not see the system and the Python packages: the image was not scanned")
+          if not os_pkgs or missing:
+              print("trivy did not see the system packages, or these locked ones:", ", ".join(missing))
               sys.exit(2)
           for v in vulns:
               print(v["VulnerabilityID"], v.get("PkgName"), v.get("InstalledVersion"), "->", v.get("FixedVersion"))
@@ -124,7 +131,14 @@ jobs:
           skopeo copy --all --preserve-digests --digestfile /tmp/digest oci-archive:/tmp/image.tar "docker://$IMAGE:$v"
           digest=$(cat /tmp/digest)
           case "$digest" in sha256:*) ;; *) echo "no digest after push: ${digest}"; exit 1;; esac
-          skopeo copy --all --preserve-digests "docker://$IMAGE@$digest" "docker://$IMAGE:${v%.*}"
+          # <x.y> follows the newest <x.y.z> only: a re-run or a late older patch release never moves it back.
+          newest=$(skopeo list-tags "docker://$IMAGE" | jq -r '.Tags[]' | grep -E "^${v%.*}\.[0-9]+$" \
+            | sort -V | tail -1)
+          if [ "$newest" = "$v" ]; then
+            skopeo copy --all --preserve-digests "docker://$IMAGE@$digest" "docker://$IMAGE:${v%.*}"
+          else
+            echo "${v%.*} stays on ${newest}, newer than ${v}"
+          fi
           echo "what an installation should pin: $IMAGE@$digest"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 

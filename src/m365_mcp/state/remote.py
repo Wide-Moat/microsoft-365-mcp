@@ -43,20 +43,31 @@ _SHEBANG = "#!lua\n"
 
 _NOW = "local t = redis.call('TIME') local now = tonumber(t[1]) + tonumber(t[2]) / 1000000\n"
 
-# KEYS[1] bucket. ARGV: capacity, refill per second. Returns {taken, tokens after}.
+# KEYS: the person's bucket under each key of the key file (one, or two during a rotation). ARGV: capacity,
+# refill per second. A token is taken from every one or from none, so pods holding the key file in either
+# order during a rotation draw from a bucket they share. Returns {taken, tokens after, the fewest}.
 _TAKE = (
     _NOW
     + """
 local cap = tonumber(ARGV[1]) local rate = tonumber(ARGV[2])
-local b = redis.call('HMGET', KEYS[1], 'tokens', 'at')
-local tokens = tonumber(b[1]) local at = tonumber(b[2])
-if tokens == nil or at == nil then tokens = cap at = now end
-tokens = math.min(cap, tokens + math.max(0, now - at) * rate)
+local tokens = {}
+local fewest = cap
+for i, k in ipairs(KEYS) do
+  local b = redis.call('HMGET', k, 'tokens', 'at')
+  local t = tonumber(b[1]) local at = tonumber(b[2])
+  if t == nil or at == nil then t = cap at = now end
+  t = math.min(cap, t + math.max(0, now - at) * rate)
+  tokens[i] = t
+  if t < fewest then fewest = t end
+end
 local taken = 0
-if tokens >= 1 then tokens = tokens - 1 taken = 1 end
-redis.call('HSET', KEYS[1], 'tokens', tostring(tokens), 'at', tostring(now))
-redis.call('PEXPIRE', KEYS[1], math.ceil((cap - tokens) / rate * 1000) + 1000)
-return {taken, tostring(tokens)}
+if fewest >= 1 then taken = 1 end
+for i, k in ipairs(KEYS) do
+  local t = tokens[i] - taken
+  redis.call('HSET', k, 'tokens', tostring(t), 'at', tostring(now))
+  redis.call('PEXPIRE', k, math.ceil((cap - t) / rate * 1000) + 1000)
+end
+return {taken, tostring(fewest - taken)}
 """
 )
 
@@ -87,17 +98,32 @@ redis.call('HSET', KEYS[1], 'v', ARGV[2], 'o', KEYS[2], 't', tag)
 redis.call('PEXPIRE', KEYS[1], math.ceil((exp - now) * 1000))
 redis.call('ZADD', KEYS[2], exp, ARGV[1]) keep(KEYS[2])
 redis.call('ZADD', KEYS[3], exp, ARGV[1]) keep(KEYS[3])
-if tag ~= '' then redis.call('ZADD', tag, exp, ARGV[1]) keep(tag) end
+if tag ~= '' then
+  redis.call('ZREMRANGEBYSCORE', tag, '-inf', now)
+  redis.call('ZADD', tag, exp, ARGV[1]) keep(tag)
+end
 return 1
 """
 )
 
-# KEYS: busy, spent. ARGV: hold in ms.
-_CLAIM = """
+# KEYS: busy, spent, link. ARGV: hold in ms, member. A claim on a link issued under a tag (a draft) is
+# also entered in the tag's busy set for as long as it holds: an upload admitted just before its link
+# expired still counts as running into that draft while its body arrives.
+_CLAIM = (
+    _NOW
+    + _KEEP
+    + """
 if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
-if redis.call('SET', KEYS[1], '1', 'NX', 'PX', ARGV[1]) then return 1 end
-return 0
+if not redis.call('SET', KEYS[1], '1', 'NX', 'PX', ARGV[1]) then return 0 end
+local tag = redis.call('HGET', KEYS[3], 't')
+if tag and tag ~= '' then
+  local busy = tag .. ':busy'
+  redis.call('ZREMRANGEBYSCORE', busy, '-inf', now)
+  redis.call('ZADD', busy, now + tonumber(ARGV[1]) / 1000, ARGV[2]) keep(busy)
+end
+return 1
 """
+)
 
 # Forgets a link's value and its place in the owner and tag sets. Needs `now`, the all set in `all`.
 _FORGET = """
@@ -124,12 +150,13 @@ return 1
 """
 )
 
-# KEYS: tag set. ARGV: busy-key prefix.
+# KEYS: tag set. ARGV: busy-key prefix. Busy: a claim entered under the tag, still held.
 _BUSY_UNDER = (
     _NOW
     + """
-redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
-for _, m in ipairs(redis.call('ZRANGE', KEYS[1], 0, -1)) do
+local busy = KEYS[1] .. ':busy'
+redis.call('ZREMRANGEBYSCORE', busy, '-inf', now)
+for _, m in ipairs(redis.call('ZRANGE', busy, 0, -1)) do
   if redis.call('EXISTS', ARGV[1] .. m) == 1 then return 1 end
 end
 return 0
@@ -153,7 +180,18 @@ for i = 1, #members, 2 do
   redis.call('DEL', ARGV[2] .. m)
   n = n + 1
 end
-redis.call('DEL', KEYS[1])
+-- An upload still running past its link's expiry is spent too, so it cannot be followed by another.
+local busy = KEYS[1] .. ':busy'
+local running = redis.call('ZRANGE', busy, 0, -1, 'WITHSCORES')
+for i = 1, #running, 2 do
+  local m = running[i]
+  local ms = math.ceil((tonumber(running[i + 1]) - now) * 1000)
+  if ms > 0 and redis.call('EXISTS', ARGV[2] .. m) == 1 then
+    redis.call('SET', ARGV[3] .. m, '1', 'PX', ms)
+    redis.call('DEL', ARGV[2] .. m)
+  end
+end
+redis.call('DEL', KEYS[1], busy)
 return n
 """
 )
@@ -263,9 +301,13 @@ class RedisStore:
     async def ping(self) -> None:
         await self._op("ping", self._r.ping)
 
-    async def take(self, person: str, *, capacity: float, refill_per_second: float) -> tuple[bool, float]:
+    async def take(
+        self, person: str, *, capacity: float, refill_per_second: float, also: tuple[Namer, ...] = ()
+    ) -> tuple[bool, float]:
+        keys = [self._k("bucket", person)] + [f"{self._p}bucket:{n('bucket', person)}" for n in also]
+
         async def call() -> tuple[bool, float]:
-            taken, tokens = await self._take(keys=[self._k("bucket", person)], args=[capacity, refill_per_second])
+            taken, tokens = await self._take(keys=keys, args=[capacity, refill_per_second])
             return bool(int(taken)), float(tokens)
 
         return await self._op("take", call)
@@ -296,7 +338,8 @@ class RedisStore:
 
         async def call() -> bool:
             got = await self._claim(
-                keys=[f"{self._p}busy:{member}", f"{self._p}spent:{member}"], args=[max(1, math.ceil(hold * 1000))]
+                keys=[f"{self._p}busy:{member}", f"{self._p}spent:{member}", f"{self._p}link:{member}"],
+                args=[max(1, math.ceil(hold * 1000)), member],
             )
             return bool(int(got))
 

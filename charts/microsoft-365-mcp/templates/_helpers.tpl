@@ -72,5 +72,9 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- range $k, $_ := $v.podLabels -}}
 {{- if has $k (list "app.kubernetes.io/name" "app.kubernetes.io/instance") -}}{{- fail (printf "podLabels.%s is set by the chart: the Deployment selects its pods by it" $k) -}}{{- end -}}
 {{- end -}}
+{{- range $k, $_ := $v.metrics.serviceMonitor.labels -}}
+{{- if hasPrefix "app.kubernetes.io/" $k -}}{{- fail (printf "metrics.serviceMonitor.labels.%s is set by the chart" $k) -}}{{- end -}}
+{{- if eq $k "helm.sh/chart" -}}{{- fail "metrics.serviceMonitor.labels.helm.sh/chart is set by the chart" -}}{{- end -}}
+{{- end -}}
 {{- if hasKey $v.podAnnotations "microsoft-365-mcp/key-revision" -}}{{- fail "podAnnotations.microsoft-365-mcp/key-revision is set by the chart from key.revision" -}}{{- end -}}
 {{- end -}}

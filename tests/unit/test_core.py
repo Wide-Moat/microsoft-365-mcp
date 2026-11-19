@@ -289,3 +289,21 @@ async def test_a_crash_carrying_content_logs_none_of_it_through_the_filter(graph
         root.setLevel(old_level)
     assert r.error
     assert "secret.person" not in out.getvalue()
+
+
+async def test_during_a_key_rotation_every_pod_draws_from_one_allowance():
+    from m365_mcp.state.memory import MemoryStore
+    from m365_mcp.state.store import Namer
+
+    old, new = Namer(b"o" * 32), Namer(b"n" * 32)
+    shared = MemoryStore(old)
+    promoted = Guard(shared.view(new), previous=(old,))  # key file: new, old
+    waiting = Guard(shared, previous=(new,))  # key file: old, new
+    outcomes = []
+    for i in range(11):
+        try:
+            await (promoted if i % 2 else waiting).check("p", kind="mail", user_confirmed=True)
+            outcomes.append("ok")
+        except M365Error as e:
+            outcomes.append(e.key)
+    assert outcomes == ["ok"] * 10 + ["rate"]

@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from m365_mcp.state.store import StoreUnavailable
+from m365_mcp.state.store import Namer, StoreUnavailable
 
 T = {"owner_cap": 300, "total_cap": 5000, "tag": ""}
 
@@ -272,3 +272,43 @@ async def test_a_live_link_is_never_overwritten(replicas):
     assert await a.link_put("same-id", b"first", expires=exp, owner="o1", **T)
     assert not await b.link_put("same-id", b"second", expires=exp, owner="o2", **T)
     assert await a.link_get("same-id") == b"first"
+
+
+async def test_an_upload_admitted_before_its_link_expired_still_holds_the_draft(replicas):
+    # The body may take minutes after the link's own expiry: sending the draft meanwhile would send
+    # it without what is still arriving.
+    a, b = replicas
+    await a.link_put("late", b"v", expires=time.time() + 0.6, owner="o", owner_cap=10, total_cap=100, tag="draft:o:D7")
+    assert await a.link_claim("late", hold=60)
+    await asyncio.sleep(0.8)
+    assert await b.link_get("late") is None, "the link itself has expired"
+    assert await b.link_busy_under("draft:o:D7"), "the running upload no longer holds its draft"
+    await b.link_revoke("draft:o:D7")
+    assert await a.link_spent("late") and not await a.link_busy_under("draft:o:D7")
+
+
+async def test_expired_links_do_not_pile_up_under_one_draft(replicas):
+    a, _ = replicas
+    if a.kind != "redis":
+        pytest.skip("memory prunes on every operation")
+    for i in range(5):
+        await a.link_put(
+            f"gone-{i}", b"v", expires=time.time() + 0.3, owner="o", owner_cap=10, total_cap=100, tag="draft:o:D8"
+        )
+    await asyncio.sleep(0.5)
+    await a.link_put("live", b"v", expires=time.time() + 60, owner="o", owner_cap=10, total_cap=100, tag="draft:o:D8")
+    assert await a._r.zcard(a._k("tag", "draft:o:D8")) == 1
+
+
+async def test_during_a_rotation_pods_holding_the_keys_in_either_order_share_one_allowance(replicas):
+    # Phase 2 of a rotation: some pods name things under [old, new], some under [new, old]. A send on
+    # either draws from both buckets, so ten sends in all, wherever they land.
+    a, b = replicas
+    old, new = Namer(b"o" * 32), Namer(b"n" * 32)
+    before = a.view(old)  # names under the old key, opens with the new one too
+    after = b.view(new)
+    results = []
+    for i in range(12):
+        store, also = (before, (new,)) if i % 2 else (after, (old,))
+        results.append((await store.take("rotating", capacity=10, refill_per_second=0.001, also=also))[0])
+    assert results.count(True) == 10 and results[-2:] == [False, False]

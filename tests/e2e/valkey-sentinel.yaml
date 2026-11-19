@@ -112,7 +112,7 @@ spec:
               sentinel sentinel-pass $SPW
               sentinel monitor mymaster valkey-a.$NS.svc.cluster.local 6379 2
               sentinel auth-pass mymaster $PW
-              sentinel down-after-milliseconds mymaster 5000
+              sentinel down-after-milliseconds mymaster 10000
               sentinel failover-timeout mymaster 15000
               sentinel parallel-syncs mymaster 1
               CONF

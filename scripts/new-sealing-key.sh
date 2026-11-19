@@ -43,6 +43,8 @@ if k get secret "$name" -o json >"$work/secret.json" 2>"$work/err"; then
   exists=1
   # A literal key lookup: a field such as `sealing.key` is not a JSONPath.
   jq -r --arg f "$field" '.data[$f] // empty' "$work/secret.json" >"$work/b64"
+  # The version read: the write below is refused if anyone changed the Secret since (two rotations at once).
+  version=$(jq -r '.metadata.resourceVersion' "$work/secret.json")
   rm -f "$work/secret.json"
   if [ -s "$work/b64" ]; then
     openssl base64 -d -A <"$work/b64" >"$work/current" || { echo "the Secret's $field is not base64" >&2; exit 2; }
@@ -115,10 +117,17 @@ esac
 rm -f "$work/current" "$work/lines" "$work/b64"
 
 value=$(openssl base64 -A <"$work/key")
-printf '{"data":{"%s":"%s"}}' "$field" "$value" >"$work/patch.json"
+if [ "$exists" = 1 ]; then
+  printf '{"metadata":{"resourceVersion":"%s"},"data":{"%s":"%s"}}' "$version" "$field" "$value" >"$work/patch.json"
+else
+  printf '{"data":{"%s":"%s"}}' "$field" "$value" >"$work/patch.json"
+fi
 unset value
 if [ "$exists" = 1 ]; then
-  k patch secret "$name" --type merge --patch-file "$work/patch.json" >/dev/null
+  k patch secret "$name" --type merge --patch-file "$work/patch.json" >/dev/null || {
+    echo "the Secret changed while this ran (or could not be written): nothing was changed; run it again" >&2
+    exit 2
+  }
 else
   printf '{"apiVersion":"v1","kind":"Secret","type":"Opaque","metadata":{"name":"%s","namespace":"%s"},' \
     "$name" "$ns" >"$work/new.json"

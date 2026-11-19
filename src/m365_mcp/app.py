@@ -193,7 +193,7 @@ def build(settings: Settings, store: StateStore | None = None) -> Apps:
             settings=settings,
             signer=make_signer(settings, store),
             cursors=Cursors(settings.sign_keys[0] if settings.sign_keys else None),
-            guard=Guard(store),
+            guard=Guard(store, previous=tuple(Namer(k) for k in settings.previous_state_keys)),
         )
     )
     server = M365Server(settings)
@@ -251,6 +251,10 @@ def build(settings: Settings, store: StateStore | None = None) -> Apps:
         lifespan=lifespan,
     )
     main.add_middleware(HttpMetrics, group_of=main_group)
+    # Every route group's in-flight gauge exists from the start, at 0: an autoscaler reading it finds a
+    # value on a pod that has served nothing yet, not a missing metric.
+    for group in ("mcp", "links", "health", "other"):
+        HTTP_IN_FLIGHT.labels(group)
     links = links_app()
     links.add_middleware(HttpMetrics, group_of=links_group)
     # The probes are here too, so the kubelet never needs the MCP port.
