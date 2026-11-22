@@ -8,7 +8,7 @@ dependencies = [
   "mcp==2.3.0",
   "httpx==0.28.1",
   "pydantic==2.14.1",
-  "nh3==0.3.7",
+  "nh3==0.3.8",
   "css-inline==0.23.1",
   "cryptography>=50.0.2",
   "uvicorn==0.54.0",
